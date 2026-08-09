@@ -63,17 +63,14 @@ export default function App() {
   const [registeredStaff, setRegisteredStaff] = useState<RegisteredStaff[]>(() => {
     try {
       const saved = localStorage.getItem('gym_registered_staff');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: RegisteredStaff[] = JSON.parse(saved);
+        return parsed.filter(
+          (s) => !s.name.toLowerCase().includes('alex') && !s.name.toLowerCase().includes('staff')
+        );
+      }
     } catch {}
-    return [
-      {
-        id: 'STF-001',
-        name: 'Alex (Duty Staff)',
-        phone: '8123456',
-        pin: '123456', // 6 unique digits
-        registeredAt: new Date().toISOString(),
-      },
-    ];
+    return [];
   });
 
   // Security PIN and Staff Shift state (persisted in localStorage)
@@ -91,7 +88,7 @@ export default function App() {
       const saved = localStorage.getItem('gym_available_stores');
       if (saved) return JSON.parse(saved);
     } catch {}
-    return ['Binti Gym', 'Apex Fitness Terminal', 'Iron Vault Gym', 'Pulse Health Club', 'Metro Fitness Club'];
+    return [];
   });
 
   // Terminal Push Notifications State

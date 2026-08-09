@@ -1041,8 +1041,9 @@ app.get('/checkin', (req, res, next) => {
 
 // Server Initialization
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const vitePkg = 'vite';
+    const { createServer: createViteServer } = await import(/* @vite-ignore */ vitePkg);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

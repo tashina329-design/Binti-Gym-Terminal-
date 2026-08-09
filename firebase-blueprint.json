@@ -1,19 +1,26 @@
 {
   "entities": {
     "GymData": {
-      "title": "Gym Data Record",
-      "description": "Live synchronized data for sales, attendance, members, and expenses",
+      "title": "Gym Data Store",
+      "description": "Live synchronized data for sales, attendance, members, staff, shifts, and expenses across all devices",
       "type": "object",
       "properties": {
-        "updatedAt": { "type": "string" },
-        "lastAction": { "type": "string" }
+        "updatedAt": { "type": "number" },
+        "deviceId": { "type": "string" },
+        "members": { "type": "array" },
+        "attendance": { "type": "array" },
+        "sales": { "type": "array" },
+        "expenses": { "type": "array" },
+        "registeredStaff": { "type": "array" },
+        "activeShift": { "type": "object" },
+        "staffPin": { "type": "string" }
       }
     }
   },
   "firestore": {
     "/gym/{docId}": {
       "schema": { "$ref": "#/entities/GymData" },
-      "description": "Central collection for live sync state"
+      "description": "Central collection for live sync state across devices"
     }
   }
 }

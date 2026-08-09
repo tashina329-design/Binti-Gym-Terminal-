@@ -1,4 +1,4 @@
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface SyncEventPayload {
@@ -9,6 +9,16 @@ export interface SyncEventPayload {
   timestamp?: string;
   memberName?: string;
   memberId?: string;
+}
+
+export interface GymDataStore {
+  members: any[];
+  attendance: any[];
+  expenses: any[];
+  sales: any[];
+  registeredStaff: any[];
+  activeShift: any | null;
+  staffPin: string;
 }
 
 let cachedDeviceId: string | null = null;
@@ -30,39 +40,133 @@ export function getDeviceId(): string {
 }
 
 // BroadcastChannel for instant same-browser cross-tab sync
-const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
-  ? new BroadcastChannel('binti_gym_live_sync_channel')
-  : null;
+const syncChannel =
+  typeof window !== 'undefined' && 'BroadcastChannel' in window
+    ? new BroadcastChannel('binti_gym_live_sync_channel')
+    : null;
 
 let lastHandledTimestamp = 0;
 
+export async function fetchCloudStore(): Promise<GymDataStore | null> {
+  try {
+    const storeDocRef = doc(db, 'gym', 'store');
+    const snapshot = await getDoc(storeDocRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      if (data.store) {
+        try {
+          localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
+          if (data.store.registeredStaff) {
+            localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+          }
+          if (data.store.staffPin) {
+            localStorage.setItem('gym_staff_pin', data.store.staffPin);
+          }
+          if (data.store.activeShift !== undefined) {
+            if (data.store.activeShift) {
+              localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
+            } else {
+              localStorage.removeItem('gym_active_shift');
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to sync cloud store to localStorage:', e);
+        }
+        return data.store as GymDataStore;
+      }
+    }
+  } catch (err) {
+    console.warn('Error fetching cloud store:', err);
+  }
+  return null;
+}
+
 export function subscribeLiveSync(
-  onUpdate: (eventData?: SyncEventPayload, isRemote?: boolean) => void,
+  onUpdate: (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => void,
   onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void
 ) {
   let unsubFirestore = () => {};
   const myDeviceId = getDeviceId();
 
-  // 1. Listen to Firestore real-time doc updates across devices
+  const updateNetworkStatus = () => {
+    if (typeof window !== 'undefined' && !window.navigator.onLine) {
+      if (onStatusChange) onStatusChange('offline');
+    }
+  };
+
+  updateNetworkStatus();
+
+  // Listen to window online/offline events
+  const handleOnline = () => {
+    if (onStatusChange) onStatusChange('connected');
+    // Auto re-sync pending offline changes when coming back online
+    try {
+      const pending = localStorage.getItem('gym_pending_offline_sync');
+      if (pending === 'true') {
+        localStorage.removeItem('gym_pending_offline_sync');
+        broadcastLiveSync({
+          type: 'reset',
+          title: '📶 Back Online',
+          message: 'Offline changes successfully synchronized with cloud database.',
+        });
+      }
+    } catch {}
+  };
+
+  const handleOffline = () => {
+    if (onStatusChange) onStatusChange('offline');
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+  }
+
+  // 1. Listen to Firestore real-time doc updates across all devices
   try {
-    const syncDocRef = doc(db, 'gym', 'sync');
+    const storeDocRef = doc(db, 'gym', 'store');
     unsubFirestore = onSnapshot(
-      syncDocRef,
+      storeDocRef,
       (snapshot) => {
-        if (onStatusChange) onStatusChange('connected');
+        const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
+        if (onStatusChange) onStatusChange(isOnline ? 'connected' : 'offline');
         if (snapshot.exists()) {
           const data = snapshot.data();
           const updatedAt = data.updatedAt || 0;
           if (updatedAt > lastHandledTimestamp) {
             lastHandledTimestamp = updatedAt;
             const isRemote = data.deviceId ? data.deviceId !== myDeviceId : true;
-            onUpdate(data.lastEvent || undefined, isRemote);
+
+            // Sync remote store into local storage if present
+            if (data.store) {
+              try {
+                localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
+                if (data.store.registeredStaff) {
+                  localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+                }
+                if (data.store.staffPin) {
+                  localStorage.setItem('gym_staff_pin', data.store.staffPin);
+                }
+                if (data.store.activeShift !== undefined) {
+                  if (data.store.activeShift) {
+                    localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
+                  } else {
+                    localStorage.removeItem('gym_active_shift');
+                  }
+                }
+              } catch (e) {
+                console.warn('Error updating local cache from remote cloud store:', e);
+              }
+            }
+
+            onUpdate(data.lastEvent || undefined, isRemote, data.store || undefined);
           }
         }
       },
       (error) => {
-        console.warn('Firestore live sync listener fallback:', error);
-        if (onStatusChange) onStatusChange('reconnecting');
+        console.warn('Firestore live sync listener reconnecting or offline:', error);
+        const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
+        if (onStatusChange) onStatusChange(isOnline ? 'reconnecting' : 'offline');
       }
     );
   } catch (err) {
@@ -75,7 +179,12 @@ export function subscribeLiveSync(
     if (event.data && event.data.updatedAt > lastHandledTimestamp) {
       lastHandledTimestamp = event.data.updatedAt;
       const isRemote = event.data.deviceId !== myDeviceId;
-      onUpdate(event.data.lastEvent || undefined, isRemote);
+      if (event.data.store) {
+        try {
+          localStorage.setItem('gym_data_store_v1', JSON.stringify(event.data.store));
+        } catch {}
+      }
+      onUpdate(event.data.lastEvent || undefined, isRemote, event.data.store || undefined);
     }
   };
 
@@ -94,7 +203,7 @@ export function subscribeLiveSync(
           if (parsed.type === 'data_updated' && parsed.timestamp > lastHandledTimestamp) {
             lastHandledTimestamp = parsed.timestamp;
             const isRemote = parsed.deviceId ? parsed.deviceId !== myDeviceId : true;
-            onUpdate(parsed.lastEvent || undefined, isRemote);
+            onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
           }
         } catch {}
       };
@@ -112,7 +221,7 @@ export function subscribeLiveSync(
         if (parsed.updatedAt > lastHandledTimestamp) {
           lastHandledTimestamp = parsed.updatedAt;
           const isRemote = parsed.deviceId !== myDeviceId;
-          onUpdate(parsed.lastEvent || undefined, isRemote);
+          onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
         }
       } catch {}
     }
@@ -131,21 +240,33 @@ export function subscribeLiveSync(
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     }
   };
 }
 
-export async function broadcastLiveSync(eventData?: SyncEventPayload) {
+export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?: GymDataStore) {
   const timestamp = Date.now();
   const myDeviceId = getDeviceId();
+
+  // Load latest store if not provided
+  let storeToSync = storeData;
+  if (!storeToSync && typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('gym_data_store_v1');
+      if (saved) storeToSync = JSON.parse(saved);
+    } catch {}
+  }
 
   const payload = {
     updatedAt: timestamp,
     deviceId: myDeviceId,
     lastEvent: eventData ? { ...eventData, deviceId: myDeviceId } : null,
+    store: storeToSync || null,
   };
 
-  // Broadcast to BroadcastChannel
+  // Broadcast to BroadcastChannel (local tabs)
   if (syncChannel) {
     try {
       syncChannel.postMessage(payload);
@@ -159,12 +280,22 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload) {
     localStorage.setItem('gym_live_sync_trigger', JSON.stringify(payload));
   } catch {}
 
-  // Broadcast to Firestore
+  // Check if offline
+  const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
+  if (isOffline) {
+    try {
+      localStorage.setItem('gym_pending_offline_sync', 'true');
+    } catch {}
+  }
+
+  // Broadcast to Firestore for real-time multi-device cloud synchronization
   try {
-    const syncDocRef = doc(db, 'gym', 'sync');
-    await setDoc(syncDocRef, payload, { merge: true });
+    const storeDocRef = doc(db, 'gym', 'store');
+    await setDoc(storeDocRef, payload, { merge: true });
   } catch (err) {
-    console.warn('Firestore broadcastLiveSync error:', err);
+    console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);
+    try {
+      localStorage.setItem('gym_pending_offline_sync', 'true');
+    } catch {}
   }
 }
-

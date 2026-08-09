@@ -19,7 +19,7 @@ import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
 import { PinCodeModal } from './components/PinCodeModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
-import { apiFetch } from './lib/api';
+import { apiFetch, loadClientStore, saveClientStore } from './lib/api';
 import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, RegisteredStaff, PushNotification } from './types';
@@ -134,13 +134,25 @@ export default function App() {
   };
 
   const handleRegisterStaff = (newStaff: RegisteredStaff) => {
+    let updatedStaffList: RegisteredStaff[] = [];
     setRegisteredStaff((prev) => {
-      const updated = [...prev, newStaff];
-      localStorage.setItem('gym_registered_staff', JSON.stringify(updated));
-      return updated;
+      updatedStaffList = [...prev, newStaff];
+      localStorage.setItem('gym_registered_staff', JSON.stringify(updatedStaffList));
+      return updatedStaffList;
     });
     setStaffPin(newStaff.pin);
     localStorage.setItem('gym_staff_pin', newStaff.pin);
+
+    // Save & broadcast live sync to Cloud Firestore so all devices (mobile, tablets, PC) receive the new store PIN immediately
+    const store = loadClientStore();
+    store.registeredStaff = updatedStaffList.length > 0 ? updatedStaffList : [...registeredStaff, newStaff];
+    store.staffPin = newStaff.pin;
+    if (!store.availableStores) store.availableStores = availableStores;
+    saveClientStore(store, {
+      type: 'shift',
+      title: '🔑 New Store Terminal Registered',
+      message: `Store terminal "${newStaff.name}" registered with 6-digit PIN.`,
+    });
   };
 
   const [activeShift, setActiveShift] = useState<StaffShift | null>(() => {
@@ -230,6 +242,9 @@ export default function App() {
         if (cloudStore.staffPin) {
           setStaffPin(cloudStore.staffPin);
         }
+        if (cloudStore.availableStores) {
+          setAvailableStores(cloudStore.availableStores);
+        }
         if (cloudStore.activeShift !== undefined) {
           setActiveShift(cloudStore.activeShift);
         }
@@ -253,6 +268,9 @@ export default function App() {
           }
           if (remoteStore.staffPin) {
             setStaffPin(remoteStore.staffPin);
+          }
+          if (remoteStore.availableStores) {
+            setAvailableStores(remoteStore.availableStores);
           }
           if (remoteStore.activeShift !== undefined) {
             setActiveShift(remoteStore.activeShift);
@@ -681,6 +699,15 @@ export default function App() {
   const handleUpdatePin = (newPin: string) => {
     setStaffPin(newPin);
     localStorage.setItem('gym_staff_pin', newPin);
+
+    // Save and broadcast to Cloud Firestore
+    const store = loadClientStore();
+    store.staffPin = newPin;
+    saveClientStore(store, {
+      type: 'shift',
+      title: '🔐 Terminal PIN Updated',
+      message: 'Store terminal PIN updated successfully across devices.',
+    });
   };
 
   // Standalone Customer Entrance Check-In Terminal Mode
@@ -925,13 +952,26 @@ export default function App() {
           const finalStore = storeName?.trim() || currentStore;
           setCurrentStore(finalStore);
           localStorage.setItem('current_store_name', finalStore);
-          setAvailableStores((prev) => {
-            if (!prev.includes(finalStore)) {
-              const updated = [...prev, finalStore];
-              localStorage.setItem('gym_available_stores', JSON.stringify(updated));
-              return updated;
+          
+          let updatedStores = availableStores;
+          if (!availableStores.includes(finalStore)) {
+            updatedStores = [...availableStores, finalStore];
+            setAvailableStores(updatedStores);
+            localStorage.setItem('gym_available_stores', JSON.stringify(updatedStores));
+          }
+
+          // Ensure store list & staff details are saved and synced to Cloud Firestore
+          const store = loadClientStore();
+          store.availableStores = updatedStores;
+          if (authenticatedStaff) {
+            if (!store.registeredStaff.some((s) => s.pin === authenticatedStaff.pin)) {
+              store.registeredStaff = [...store.registeredStaff, authenticatedStaff];
             }
-            return prev;
+          }
+          saveClientStore(store, {
+            type: 'shift',
+            title: '🏬 Store Terminal Active',
+            message: `Logged into store terminal "${finalStore}".`,
           });
 
           setShowPinModal(false);

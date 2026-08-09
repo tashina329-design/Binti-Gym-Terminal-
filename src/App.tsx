@@ -20,7 +20,7 @@ import { StaffShiftModal } from './components/StaffShiftModal';
 import { PinCodeModal } from './components/PinCodeModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
 import { apiFetch } from './lib/api';
-import { subscribeLiveSync, broadcastLiveSync, SyncEventPayload } from './lib/firebaseSync';
+import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, RegisteredStaff, PushNotification } from './types';
 
@@ -38,6 +38,8 @@ export default function App() {
     }
     return false;
   });
+
+  const [syncStatus, setSyncStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
 
   // Listen for URL parameter changes or hash changes for QR Code entrance terminal
   useEffect(() => {
@@ -218,53 +220,89 @@ export default function App() {
     }
   }, [selectedDate]);
 
+  // Initial fetch of central cloud database store on mount
+  useEffect(() => {
+    fetchCloudStore().then((cloudStore) => {
+      if (cloudStore) {
+        if (cloudStore.registeredStaff) {
+          setRegisteredStaff(cloudStore.registeredStaff);
+        }
+        if (cloudStore.staffPin) {
+          setStaffPin(cloudStore.staffPin);
+        }
+        if (cloudStore.activeShift !== undefined) {
+          setActiveShift(cloudStore.activeShift);
+        }
+        loadDashboard(selectedDate);
+      }
+    });
+  }, [selectedDate, loadDashboard]);
+
   useEffect(() => {
     loadDashboard(selectedDate);
   }, [selectedDate, loadDashboard]);
 
   // Real-Time Multi-Channel Live Sync & Cross-Device Listener
   useEffect(() => {
-    const unsubscribe = subscribeLiveSync((eventData?: SyncEventPayload, isRemote?: boolean) => {
-      // Reload dashboard state
-      loadDashboard(selectedDate);
+    const unsubscribe = subscribeLiveSync(
+      (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => {
+        // Update local React state if remote store is passed
+        if (remoteStore) {
+          if (remoteStore.registeredStaff) {
+            setRegisteredStaff(remoteStore.registeredStaff);
+          }
+          if (remoteStore.staffPin) {
+            setStaffPin(remoteStore.staffPin);
+          }
+          if (remoteStore.activeShift !== undefined) {
+            setActiveShift(remoteStore.activeShift);
+          }
+        }
 
-      // If update came from another device/tab, play chime & display notification banner
-      if (isRemote && eventData) {
-        const title = eventData.title || '⚡ Live Device Sync Alert';
-        const message = eventData.message || 'Data updated in real time from another device.';
-        const timeStr =
-          eventData.timestamp ||
-          new Date().toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true,
-          });
+        // Reload dashboard state
+        loadDashboard(selectedDate);
 
-        // Play audio chime on listening device
-        playSelfCheckinNotificationSound(
-          eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
-        );
+        // If update came from another device/tab, play chime & display notification banner
+        if (isRemote && eventData) {
+          const title = eventData.title || '⚡ Live Device Sync Alert';
+          const message = eventData.message || 'Data updated in real time from another device.';
+          const timeStr =
+            eventData.timestamp ||
+            new Date().toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: true,
+            });
 
-        const newNotif: PushNotification = {
-          id: 'notif-' + Date.now(),
-          title,
-          message,
-          timestamp: timeStr,
-          memberName: eventData.memberName,
-          memberId: eventData.memberId,
-          type: 'checkin',
-          read: false,
-        };
+          // Play audio chime on listening device
+          playSelfCheckinNotificationSound(
+            eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
+          );
 
-        setNotifications((prev) => [newNotif, ...prev]);
-        setActivePushBanner(newNotif);
+          const newNotif: PushNotification = {
+            id: 'notif-' + Date.now(),
+            title,
+            message,
+            timestamp: timeStr,
+            memberName: eventData.memberName,
+            memberId: eventData.memberId,
+            type: 'checkin',
+            read: false,
+          };
 
-        setTimeout(() => {
-          setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
-        }, 6000);
+          setNotifications((prev) => [newNotif, ...prev]);
+          setActivePushBanner(newNotif);
+
+          setTimeout(() => {
+            setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
+          }, 6000);
+        }
+      },
+      (status) => {
+        setSyncStatus(status);
       }
-    });
+    );
 
     return () => unsubscribe();
   }, [selectedDate, loadDashboard]);
@@ -754,6 +792,7 @@ export default function App() {
           activeShift={activeShift}
           notifications={notifications}
           currentStore={currentStore}
+          syncStatus={syncStatus}
           onOpenShiftModal={() => setShowShiftModal(true)}
           onLockTerminal={() => setShowPinModal(true)}
           onToggleCheckinMode={() => setIsCheckinMode(true)}

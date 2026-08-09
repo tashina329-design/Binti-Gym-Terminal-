@@ -157,11 +157,32 @@ export function loadClientStore(): GymDataStore {
   return defaultStore;
 }
 
-export function saveClientStore(store: GymDataStore): void {
+import { broadcastLiveSync, SyncEventPayload } from './firebaseSync';
+
+export function saveClientStore(store: GymDataStore, eventPayload?: SyncEventPayload): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    if (store.registeredStaff) {
+      localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
+    }
+    if (store.staffPin) {
+      localStorage.setItem('gym_staff_pin', store.staffPin);
+    }
+    if (store.activeShift !== undefined) {
+      if (store.activeShift) {
+        localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
+      } else {
+        localStorage.removeItem('gym_active_shift');
+      }
+    }
   } catch (e) {
     console.error('Failed to save to localStorage', e);
+  }
+
+  try {
+    broadcastLiveSync(eventPayload, store);
+  } catch (e) {
+    console.warn('Failed to trigger broadcastLiveSync:', e);
   }
 }
 

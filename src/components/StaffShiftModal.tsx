@@ -205,7 +205,7 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
                 type="text"
                 value={staffName}
                 onChange={(e) => setStaffName(e.target.value)}
-                placeholder="e.g. Alex Rivera"
+                placeholder="e.g. Front Desk Staff"
                 required
                 className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2.5 text-sm text-slate-100 font-bold focus:outline-none"
               />

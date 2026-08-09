@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Dumbbell, RefreshCw, QrCode, Monitor, UserCheck, Bell, X, CheckCircle2, Lock, LogOut, Building2, WifiOff } from 'lucide-react';
 import { StaffShift, PushNotification } from '../types';
-import { getBruneiFormattedDate } from '../lib/bruneiDate';
+import { getBruneiFormattedDate } from '../lib/api';
 
 interface HeaderProps {
   viewDate: string;

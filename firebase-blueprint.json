@@ -1,0 +1,19 @@
+{
+  "entities": {
+    "GymData": {
+      "title": "Gym Data Record",
+      "description": "Live synchronized data for sales, attendance, members, and expenses",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string" },
+        "lastAction": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/gym/{docId}": {
+      "schema": { "$ref": "#/entities/GymData" },
+      "description": "Central collection for live sync state"
+    }
+  }
+}

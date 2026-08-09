@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  background-color: #020617 !important; /* slate-950 dark background */
+  color: #f8fafc !important; /* slate-50 text */
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+/* Prevent auto-zoom on iOS/touchscreen inputs */
+@media screen and (max-width: 1024px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="date"],
+  input[type="email"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+

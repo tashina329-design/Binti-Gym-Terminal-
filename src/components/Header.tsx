@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Dumbbell, RefreshCw, QrCode, Monitor, UserCheck, Bell, X, CheckCircle2, Lock, LogOut, Building2 } from 'lucide-react';
+import { Dumbbell, RefreshCw, QrCode, Monitor, UserCheck, Bell, X, CheckCircle2, Lock, LogOut, Building2, WifiOff } from 'lucide-react';
 import { StaffShift, PushNotification } from '../types';
+import { getBruneiFormattedDate } from '../lib/bruneiDate';
 
 interface HeaderProps {
   viewDate: string;
@@ -9,6 +10,7 @@ interface HeaderProps {
   activeShift: StaffShift | null;
   notifications?: PushNotification[];
   currentStore?: string;
+  syncStatus?: 'connected' | 'reconnecting' | 'offline';
   onOpenShiftModal: () => void;
   onLockTerminal: () => void;
   onToggleCheckinMode: () => void;
@@ -23,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeShift,
   notifications = [],
   currentStore = 'Binti Gym',
+  syncStatus = 'connected',
   onOpenShiftModal,
   onLockTerminal,
   onToggleCheckinMode,
@@ -31,12 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
-  const currentDateFormatted = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  const currentDateFormatted = getBruneiFormattedDate();
 
   const unreadCount = notifications.length;
 
@@ -96,6 +94,46 @@ export const Header: React.FC<HeaderProps> = ({
           <LogOut className="w-3.5 h-3.5" />
           <span>Log Out</span>
         </button>
+
+        {/* Real-time Cross-Device Sync & Offline Mode Indicator Badge */}
+        <div
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+            syncStatus === 'connected'
+              ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
+              : syncStatus === 'reconnecting'
+              ? 'bg-amber-950/40 border-amber-500/30 text-amber-300 animate-pulse'
+              : 'bg-amber-950/50 border-amber-500/40 text-amber-200'
+          }`}
+          title={
+            syncStatus === 'connected'
+              ? 'Live multi-device cloud database sync active'
+              : syncStatus === 'reconnecting'
+              ? 'Reconnecting to cloud server...'
+              : 'Offline Mode active: All transactions save locally to device and auto-sync when online'
+          }
+        >
+          <div
+            className={`w-2 h-2 rounded-full ${
+              syncStatus === 'connected'
+                ? 'bg-emerald-400 animate-pulse'
+                : syncStatus === 'reconnecting'
+                ? 'bg-amber-400 animate-ping'
+                : 'bg-amber-400'
+            }`}
+          />
+          {syncStatus === 'offline' ? (
+            <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+          ) : (
+            <RefreshCw className={`w-3 h-3 ${syncStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`} />
+          )}
+          <span>
+            {syncStatus === 'connected'
+              ? 'Multi-Device Sync Live'
+              : syncStatus === 'reconnecting'
+              ? 'Sync Reconnecting...'
+              : 'Offline Mode (Local Active)'}
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 self-end lg:self-center">

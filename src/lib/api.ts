@@ -49,6 +49,7 @@ export interface GymDataStore {
   registeredStaff: RegisteredStaff[];
   activeShift: StaffShift | null;
   staffPin: string;
+  availableStores?: string[];
 }
 
 const STORAGE_KEY = 'gym_data_store_v1';
@@ -175,7 +176,8 @@ function getDefaultStore(): GymDataStore {
       { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }
     ],
     activeShift: null,
-    staffPin: '123456'
+    staffPin: '123456',
+    availableStores: ['Binti Gym']
   };
 }
 
@@ -188,6 +190,9 @@ export function loadClientStore(): GymDataStore {
         parsed.registeredStaff = [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }];
       }
       if (!parsed.staffPin) parsed.staffPin = '123456';
+      if (!parsed.availableStores || parsed.availableStores.length === 0) {
+        parsed.availableStores = ['Binti Gym'];
+      }
       return parsed;
     }
   } catch (e) {
@@ -208,6 +213,9 @@ export function saveClientStore(store: GymDataStore, eventPayload?: SyncEventPay
     }
     if (store.staffPin) {
       localStorage.setItem('gym_staff_pin', store.staffPin);
+    }
+    if (store.availableStores) {
+      localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
     }
     if (store.activeShift !== undefined) {
       if (store.activeShift) {

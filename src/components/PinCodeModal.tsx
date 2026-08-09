@@ -13,29 +13,20 @@ interface PinCodeModalProps {
   onCancel: () => void;
 }
 
-const DEFAULT_STORES_PRESETS = [
-  'Binti Gym',
-  'Apex Fitness Terminal',
-  'Iron Vault Gym',
-  'Pulse Health Club',
-  'Metro Fitness Club',
-];
-
 export const PinCodeModal: React.FC<PinCodeModalProps> = ({
   isOpen,
   correctPin,
   registeredStaff,
   selectedStoreName = 'Binti Gym',
-  availableStores = DEFAULT_STORES_PRESETS,
+  availableStores = [],
   onSuccess,
   onRegisterStaff,
   onCancel,
 }) => {
   const [activeTab, setActiveTab] = useState<'enter_pin' | 'register'>('enter_pin');
 
-  // Multi-Store Selection State
+  // Multi-Store Input State - User enters their store name directly
   const [storeChoice, setStoreChoice] = useState<string>(selectedStoreName);
-  const [customStoreInput, setCustomStoreInput] = useState<string>('');
 
   // PIN Unlock State
   const [pin, setPin] = useState('');
@@ -43,13 +34,9 @@ export const PinCodeModal: React.FC<PinCodeModalProps> = ({
   const [isSuccess, setIsSuccess] = useState(false);
 
   // Registration Form State
-  const [regName, setRegName] = useState('');
   const [regPin, setRegPin] = useState('');
   const [regError, setRegError] = useState<string | null>(null);
   const [regSuccess, setRegSuccess] = useState(false);
-
-  // Combined list of unique stores
-  const storeList = Array.from(new Set([...DEFAULT_STORES_PRESETS, ...availableStores, selectedStoreName]));
 
   // Reset state when modal opens
   useEffect(() => {
@@ -57,13 +44,11 @@ export const PinCodeModal: React.FC<PinCodeModalProps> = ({
       setPin('');
       setErrorMsg(null);
       setIsSuccess(false);
-      setRegName('');
       setRegPin('');
       setRegError(null);
       setRegSuccess(false);
       setActiveTab('enter_pin');
-      setStoreChoice(selectedStoreName);
-      setCustomStoreInput('');
+      setStoreChoice(selectedStoreName || '');
     }
   }, [isOpen, selectedStoreName]);
 
@@ -75,10 +60,7 @@ export const PinCodeModal: React.FC<PinCodeModalProps> = ({
   };
 
   const getResolvedStoreName = (): string => {
-    if (storeChoice === '__custom__') {
-      return customStoreInput.trim() || 'Custom Store Terminal';
-    }
-    return storeChoice || 'Binti Gym';
+    return storeChoice.trim() || selectedStoreName || 'Store Terminal';
   };
 
   // Keypress handler for 6-digit PIN login
@@ -180,7 +162,7 @@ export const PinCodeModal: React.FC<PinCodeModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, pin, activeTab, storeChoice, customStoreInput]);
+  }, [isOpen, pin, activeTab, storeChoice]);
 
   if (!isOpen) return null;
 
@@ -216,38 +198,28 @@ export const PinCodeModal: React.FC<PinCodeModalProps> = ({
           Store Terminal Authorization & Login
         </h2>
         <p className="text-xs text-slate-400 text-center mb-3 mt-0.5 font-medium">
-          Select or Enter Store Terminal & Enter 6-Digit Staff PIN
+          Enter Store Terminal Name & 6-Digit Staff PIN
         </p>
 
-        {/* STORE SELECTION PROMPT */}
+        {/* STORE SELECTION PROMPT - USER ENTERS STORE NAME DIRECTLY */}
         <div className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl p-3 mb-4 space-y-2">
           <label className="block text-[11px] font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wider">
-            <Building2 className="w-3.5 h-3.5 text-emerald-400" /> Target Store Terminal:
+            <Building2 className="w-3.5 h-3.5 text-emerald-400" /> Target Store Terminal Name:
           </label>
-          <select
+          <input
+            type="text"
+            placeholder="Enter Store / Gym Terminal Name..."
             value={storeChoice}
             onChange={(e) => setStoreChoice(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs font-bold text-emerald-300 focus:outline-none cursor-pointer"
-          >
-            {storeList.map((st) => (
-              <option key={st} value={st}>
-                🏬 {st}
-              </option>
-            ))}
-            <option value="__custom__">➕ Log into / Add Custom Store Terminal...</option>
-          </select>
-
-          {storeChoice === '__custom__' && (
-            <div className="pt-1 animate-in fade-in">
-              <input
-                type="text"
-                placeholder="Type your Store / Gym Name (e.g. Titan Fitness)..."
-                value={customStoreInput}
-                onChange={(e) => setCustomStoreInput(e.target.value)}
-                className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none placeholder:text-slate-500"
-                required
-              />
-            </div>
+            list="available-store-terminals"
+            className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-xs font-bold text-emerald-300 focus:outline-none placeholder:text-slate-500 placeholder:font-normal"
+          />
+          {availableStores.length > 0 && (
+            <datalist id="available-store-terminals">
+              {availableStores.map((st) => (
+                <option key={st} value={st} />
+              ))}
+            </datalist>
           )}
 
           <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5 px-0.5">

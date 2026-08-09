@@ -19,6 +19,7 @@ export interface GymDataStore {
   registeredStaff: any[];
   activeShift: any | null;
   staffPin: string;
+  availableStores?: string[];
 }
 
 let cachedDeviceId: string | null = null;
@@ -61,6 +62,9 @@ export async function fetchCloudStore(): Promise<GymDataStore | null> {
           }
           if (data.store.staffPin) {
             localStorage.setItem('gym_staff_pin', data.store.staffPin);
+          }
+          if (data.store.availableStores) {
+            localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
           }
           if (data.store.activeShift !== undefined) {
             if (data.store.activeShift) {
@@ -146,6 +150,9 @@ export function subscribeLiveSync(
                 }
                 if (data.store.staffPin) {
                   localStorage.setItem('gym_staff_pin', data.store.staffPin);
+                }
+                if (data.store.availableStores) {
+                  localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
                 }
                 if (data.store.activeShift !== undefined) {
                   if (data.store.activeShift) {

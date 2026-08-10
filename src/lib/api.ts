@@ -406,6 +406,22 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
   };
 }
 
+export function getStoredBusinessName(): string {
+  try {
+    return localStorage.getItem('current_business_name') || 'Binti Gym';
+  } catch {
+    return 'Binti Gym';
+  }
+}
+
+export function getStoredBusinessPin(): string {
+  try {
+    return localStorage.getItem('current_business_pin') || '1234';
+  } catch {
+    return '1234';
+  }
+}
+
 export function handleClientFallbackRequest(url: string, options?: RequestInit): any {
   const store = loadClientStore();
   let body: any = {};
@@ -422,6 +438,29 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
   const dateParam = searchParams.get('date') || searchParams.get('viewDate') || undefined;
 
   const nowISO = new Date().toISOString();
+
+  if (cleanUrl.endsWith('/api/stores')) {
+    return {
+      success: true,
+      stores: [{ name: getStoredBusinessName(), registeredAt: nowISO }],
+    };
+  }
+
+  if (cleanUrl.endsWith('/api/stores/register') || cleanUrl.endsWith('/api/stores/login')) {
+    const { name, pin } = body;
+    const bizName = (name || getStoredBusinessName()).trim();
+    const bizPin = (pin || '1234').trim();
+    try {
+      localStorage.setItem('current_business_name', bizName);
+      localStorage.setItem('current_business_pin', bizPin);
+    } catch {}
+    return {
+      success: true,
+      businessName: bizName,
+      pin: bizPin,
+      store,
+    };
+  }
 
   if (cleanUrl.endsWith('/api/dashboard')) {
     return getClientDashboardData(dateParam);
@@ -456,23 +495,31 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
   }
 
   if (cleanUrl.endsWith('/api/staff/shift/start') || cleanUrl.endsWith('/api/shift/start')) {
-    const { staffName, cashStart, shiftTitle, startingFloat } = body;
-    store.activeShift = {
+    const shift = body.shift || body;
+    store.activeShift = shift.staffName ? shift : {
       id: `SHF-${Date.now()}`,
-      staffName: staffName || 'Staff',
-      shiftTitle: shiftTitle || 'Morning Shift',
+      staffName: shift.staffName || 'Staff On Duty',
+      shiftTitle: shift.shiftTitle || 'Morning shift',
       startTime: nowISO,
       startTimestamp: Date.now(),
-      startingFloat: Number(cashStart || startingFloat || 0)
+      startingFloat: Number(shift.startingFloat || shift.cashStart || 0)
     };
-    saveClientStore(store);
+    saveClientStore(store, {
+      type: 'shift',
+      title: '🟢 Duty Shift Started',
+      message: `${store.activeShift.staffName} started shift!`
+    });
     return { success: true, activeShift: store.activeShift };
   }
 
   if (cleanUrl.endsWith('/api/staff/shift/end') || cleanUrl.endsWith('/api/shift/end')) {
     const endedShift = store.activeShift;
     store.activeShift = null;
-    saveClientStore(store);
+    saveClientStore(store, {
+      type: 'shift',
+      title: '🔴 Duty Shift Ended',
+      message: 'Active duty shift ended.'
+    });
     return { success: true, endedShift };
   }
 
@@ -799,8 +846,22 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
     return handleClientFallbackRequest(url, options) as T;
   }
 
+  const businessHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Business-Name': getStoredBusinessName(),
+    'X-Business-Pin': getStoredBusinessPin(),
+  };
+
+  const reqOptions: RequestInit = {
+    ...options,
+    headers: {
+      ...businessHeaders,
+      ...(options?.headers || {}),
+    },
+  };
+
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(url, reqOptions);
     const contentType = res.headers.get('content-type') || '';
     const isJson = contentType.includes('application/json');
 

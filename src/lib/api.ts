@@ -55,11 +55,32 @@ export interface GymDataStore {
 const STORAGE_KEY = 'gym_data_store_v1';
 
 function getTodayStr(dateObj?: Date): string {
-  const d = dateObj || new Date();
+  return getBruneiTodayIsoDate(dateObj);
+}
+
+export function isSameDate(timestamp: any, targetDateStr: string): boolean {
+  if (!timestamp || !targetDateStr) return false;
+  const str = String(timestamp).trim();
+  if (str.startsWith(targetDateStr)) return true;
+
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return false;
+
+  const bruneiDate = getBruneiTodayIsoDate(d);
+  if (bruneiDate === targetDateStr) return true;
+
+  try {
+    const utcDate = d.toISOString().split('T')[0];
+    if (utcDate === targetDateStr) return true;
+  } catch (e) {}
+
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const localDate = `${year}-${month}-${day}`;
+  if (localDate === targetDateStr) return true;
+
+  return false;
 }
 
 function formatTime(dateObj?: Date): string {
@@ -278,10 +299,8 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
   }
 
   for (const s of store.sales) {
-    const d = new Date(s.timestamp);
-    const dateOfSale = getTodayStr(d);
-
-    if (dateOfSale === targetDateStr) {
+    if (isSameDate(s.timestamp, targetDateStr)) {
+      const d = new Date(s.timestamp);
       const category = s.category || '';
       const customer = s.customer || '';
       const paymentRaw = s.paymentMethod || '';
@@ -301,7 +320,7 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
 
       todaySales.push({
         timestamp: s.timestamp,
-        time: formatTime(d),
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
         category,
         customer,
         payment: paymentRaw,
@@ -312,7 +331,7 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
       if (/pt/i.test(category)) {
         const parsed = parsePTCustomer(customer);
         ptDetails.push({
-          time: formatTime(d),
+          time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
           trainer: parsed.trainer || '',
           client: parsed.clientName || '',
           sessions: parsed.sessions || '',
@@ -323,10 +342,8 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
   }
 
   for (const e of store.expenses) {
-    const d = new Date(e.timestamp);
-    const dateOfExp = getTodayStr(d);
-
-    if (dateOfExp === targetDateStr) {
+    if (isSameDate(e.timestamp, targetDateStr)) {
+      const d = new Date(e.timestamp);
       const category = e.category || '';
       const description = e.description || '';
       const paymentRaw = e.paymentMethod || '';
@@ -339,7 +356,7 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
 
       todayExpenses.push({
         timestamp: e.timestamp,
-        time: formatTime(d),
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
         category,
         description,
         payment: paymentRaw,
@@ -350,14 +367,12 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
   }
 
   for (const a of store.attendance) {
-    const d = new Date(a.timestamp);
-    const dateOfAtt = getTodayStr(d);
-
-    if (dateOfAtt === targetDateStr) {
+    if (isSameDate(a.timestamp, targetDateStr)) {
+      const d = new Date(a.timestamp);
       checkinCount++;
       todayAttendance.push({
         timestamp: a.timestamp,
-        time: formatTime(d),
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
         name: a.name || 'Guest',
         phone: a.phone || '-',
         plan: a.plan || '-',

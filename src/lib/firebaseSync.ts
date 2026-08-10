@@ -226,11 +226,11 @@ export async function authenticateCloudBusinessStore(
   }
 }
 
-export function syncStoreToBackend(store: GymDataStore, businessName?: string) {
+export async function syncStoreToBackend(store: GymDataStore, businessName?: string): Promise<GymDataStore | null> {
   try {
     const biz = businessName || getStoredBusinessName();
     const pin = getStoredBusinessPin();
-    fetch('/api/sync', {
+    const res = await fetch('/api/sync', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -238,8 +238,15 @@ export function syncStoreToBackend(store: GymDataStore, businessName?: string) {
         'X-Business-Pin': pin,
       },
       body: JSON.stringify({ store }),
-    }).catch(() => {});
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.store) {
+        return data.store as GymDataStore;
+      }
+    }
   } catch {}
+  return null;
 }
 
 export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
@@ -331,7 +338,7 @@ export function subscribeLiveSync(
     const storeDocRef = getStoreDocRef(activeBiz);
     unsubFirestore = onSnapshot(
       storeDocRef,
-      (snapshot) => {
+      async (snapshot) => {
         const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
         if (onStatusChange) onStatusChange(isOnline ? 'connected' : 'offline');
         if (snapshot.exists()) {
@@ -364,7 +371,7 @@ export function subscribeLiveSync(
               } catch (e) {
                 console.warn('Error updating local cache from remote cloud store:', e);
               }
-              syncStoreToBackend(data.store, activeBiz);
+              await syncStoreToBackend(data.store, activeBiz);
             }
 
             onUpdate(data.lastEvent || undefined, isRemote, data.store || undefined);
@@ -491,6 +498,10 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
   try {
     localStorage.setItem('gym_live_sync_trigger', JSON.stringify(payload));
   } catch {}
+
+  if (storeToSync) {
+    syncStoreToBackend(storeToSync, activeBiz);
+  }
 
   // Check if offline
   const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;

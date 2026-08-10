@@ -958,8 +958,12 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
     'X-Business-Pin': getStoredBusinessPin(),
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
   const reqOptions: RequestInit = {
     ...options,
+    signal: options?.signal || controller.signal,
     headers: {
       ...businessHeaders,
       ...(options?.headers || {}),
@@ -968,6 +972,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
 
   try {
     const res = await fetch(url, reqOptions);
+    clearTimeout(timeoutId);
     const contentType = res.headers.get('content-type') || '';
     const isJson = contentType.includes('application/json');
 

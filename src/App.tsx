@@ -338,7 +338,7 @@ export default function App() {
         type: 'reset',
         title: '🔄 Database Reset',
         message: 'System database was reset to standard demo seed records.',
-      });
+      }, loadClientStore());
     } catch (err: any) {
       alert('Error resetting database: ' + (err.message || err));
     } finally {
@@ -371,7 +371,7 @@ export default function App() {
         timestamp: timeStr,
         memberName: name,
         memberId: matchedMember?.memberId,
-      });
+      }, loadClientStore());
 
       triggerSelfCheckinNotification(
         '🔔 Self Check-In Alert',
@@ -404,7 +404,7 @@ export default function App() {
         message: `Member #${memberId} successfully checked in at terminal!`,
         timestamp: timeStr,
         memberId: memberId,
-      });
+      }, loadClientStore());
 
       triggerSelfCheckinNotification(
         '🔔 Self Check-In Alert',
@@ -438,7 +438,7 @@ export default function App() {
       message: `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.00})!`,
       timestamp: timeStr,
       memberName: data.name,
-    });
+    }, loadClientStore());
 
     if (isCheckinMode) {
       triggerSelfCheckinNotification(

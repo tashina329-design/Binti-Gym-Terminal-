@@ -402,7 +402,8 @@ export function getClientDashboardData(dateStr?: string): DashboardData {
     baiduriIn,
     bibdIn,
     ptDetails,
-    viewDate: targetDateStr
+    viewDate: targetDateStr,
+    store
   };
 }
 
@@ -972,22 +973,46 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
 
     if (res.ok && isJson) {
       try {
-        return await res.json();
+        const data = await res.json();
+        if (data && data.store) {
+          try {
+            saveClientStore(data.store);
+          } catch {}
+        }
+        return data as T;
       } catch (e) {
         isClientOnlyMode = true;
         if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-        return handleClientFallbackRequest(url, options) as T;
+        const fallbackRes = handleClientFallbackRequest(url, options) as any;
+        if (fallbackRes && fallbackRes.store) {
+          try {
+            saveClientStore(fallbackRes.store);
+          } catch {}
+        }
+        return fallbackRes as T;
       }
     }
 
     if (res.ok && !isJson) {
       const text = await res.text();
       try {
-        return JSON.parse(text);
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.store) {
+          try {
+            saveClientStore(parsed.store);
+          } catch {}
+        }
+        return parsed as T;
       } catch {
         isClientOnlyMode = true;
         if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-        return handleClientFallbackRequest(url, options) as T;
+        const fallbackRes = handleClientFallbackRequest(url, options) as any;
+        if (fallbackRes && fallbackRes.store) {
+          try {
+            saveClientStore(fallbackRes.store);
+          } catch {}
+        }
+        return fallbackRes as T;
       }
     }
 

@@ -113,6 +113,7 @@ export function subscribeLiveSync(
   businessName?: string
 ) {
   let unsubFirestore = () => {};
+  let subscriberLastTimestamp = 0;
   const myDeviceId = getDeviceId();
   const activeBiz = businessName || getStoredBusinessName();
 
@@ -161,8 +162,8 @@ export function subscribeLiveSync(
         if (snapshot.exists()) {
           const data = snapshot.data();
           const updatedAt = data.updatedAt || 0;
-          if (updatedAt > lastHandledTimestamp) {
-            lastHandledTimestamp = updatedAt;
+          if (updatedAt > subscriberLastTimestamp) {
+            subscriberLastTimestamp = updatedAt;
             const isRemote = data.deviceId ? data.deviceId !== myDeviceId : true;
 
             // Sync remote store into local storage if present
@@ -207,8 +208,8 @@ export function subscribeLiveSync(
 
   // 2. Listen to BroadcastChannel for local cross-tab instant sync
   const handleBroadcast = (event: MessageEvent) => {
-    if (event.data && event.data.updatedAt > lastHandledTimestamp) {
-      lastHandledTimestamp = event.data.updatedAt;
+    if (event.data && event.data.updatedAt > subscriberLastTimestamp) {
+      subscriberLastTimestamp = event.data.updatedAt;
       const isRemote = event.data.deviceId !== myDeviceId;
       if (event.data.store) {
         try {
@@ -231,8 +232,8 @@ export function subscribeLiveSync(
       eventSource.onmessage = (e) => {
         try {
           const parsed = JSON.parse(e.data);
-          if (parsed.type === 'data_updated' && parsed.timestamp > lastHandledTimestamp) {
-            lastHandledTimestamp = parsed.timestamp;
+          if (parsed.type === 'data_updated' && parsed.timestamp > subscriberLastTimestamp) {
+            subscriberLastTimestamp = parsed.timestamp;
             const isRemote = parsed.deviceId ? parsed.deviceId !== myDeviceId : true;
             onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
           }
@@ -249,8 +250,8 @@ export function subscribeLiveSync(
     if (e.key === 'gym_live_sync_trigger') {
       try {
         const parsed = JSON.parse(e.newValue || '{}');
-        if (parsed.updatedAt > lastHandledTimestamp) {
-          lastHandledTimestamp = parsed.updatedAt;
+        if (parsed.updatedAt > subscriberLastTimestamp) {
+          subscriberLastTimestamp = parsed.updatedAt;
           const isRemote = parsed.deviceId !== myDeviceId;
           onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
         }

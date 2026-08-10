@@ -708,7 +708,7 @@ apiRouter.post('/stores/register', (req, res, next) => {
 // POST /api/stores/login - Log into existing business with 4-digit PIN
 apiRouter.post('/stores/login', (req, res, next) => {
   try {
-    const { name, pin } = req.body || {};
+    const { name, pin, store: incomingStore } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: 'Business Name is required.' });
     }
@@ -748,6 +748,19 @@ apiRouter.post('/stores/login', (req, res, next) => {
       });
     }
 
+    if (incomingStore && typeof incomingStore === 'object') {
+      const current = container.stores[key] || loadData(cleanName);
+      container.stores[key] = {
+        ...current,
+        ...incomingStore,
+        members: incomingStore.members || current.members || [],
+        attendance: incomingStore.attendance || current.attendance || [],
+        sales: incomingStore.sales || current.sales || [],
+        expenses: incomingStore.expenses || current.expenses || [],
+      };
+      saveRootContainer(container);
+    }
+
     const store = container.stores[key] || loadData(cleanName);
     res.json({
       success: true,
@@ -755,6 +768,66 @@ apiRouter.post('/stores/login', (req, res, next) => {
       pin: biz.pin,
       store,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/sync - Synchronize store data state across cloud and server
+apiRouter.post('/sync', (req, res, next) => {
+  try {
+    const { store: incomingStore } = req.body || {};
+    const bizName = getBusinessNameFromReq(req);
+    const key = normalizeBusinessKey(bizName);
+    const currentStore = loadData(bizName);
+
+    if (incomingStore && typeof incomingStore === 'object') {
+      const mergedMembers = Array.from(
+        new Map(
+          [...(currentStore.members || []), ...(incomingStore.members || [])].map((m) => [m.memberId, m])
+        ).values()
+      );
+      const mergedAttendance = Array.from(
+        new Map(
+          [...(currentStore.attendance || []), ...(incomingStore.attendance || [])].map((a) => [
+            `${a.timestamp}-${a.memberId || a.name}`,
+            a,
+          ])
+        ).values()
+      );
+      const mergedSales = Array.from(
+        new Map(
+          [...(currentStore.sales || []), ...(incomingStore.sales || [])].map((s) => [
+            s.id || `${s.timestamp}-${s.buyerName}`,
+            s,
+          ])
+        ).values()
+      );
+      const mergedExpenses = Array.from(
+        new Map(
+          [...(currentStore.expenses || []), ...(incomingStore.expenses || [])].map((e) => [
+            e.id || `${e.timestamp}-${e.description}`,
+            e,
+          ])
+        ).values()
+      );
+
+      const mergedStore: GymDataStore = {
+        ...currentStore,
+        ...incomingStore,
+        members: mergedMembers,
+        attendance: mergedAttendance,
+        sales: mergedSales,
+        expenses: mergedExpenses,
+        registeredStaff: incomingStore.registeredStaff || currentStore.registeredStaff || [],
+        activeShift: incomingStore.activeShift !== undefined ? incomingStore.activeShift : currentStore.activeShift,
+      };
+
+      saveData(mergedStore, bizName);
+      return res.json({ success: true, store: mergedStore });
+    }
+
+    res.json({ success: true, store: currentStore });
   } catch (err) {
     next(err);
   }

@@ -17,12 +17,10 @@ import {
 interface StaffShiftModalProps {
   isOpen: boolean;
   activeShift: StaffShift | null;
-  staffPin: string;
   dashboardData: DashboardData;
   currentStore?: string;
   onStartShift: (shift: StaffShift) => void;
   onEndShift: () => void;
-  onUpdatePin: (newPin: string) => void;
   onClose: () => void;
 }
 
@@ -35,12 +33,10 @@ const SHIFT_TYPES = [
 export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
   isOpen,
   activeShift,
-  staffPin,
   dashboardData,
   currentStore = 'Binti Gym',
   onStartShift,
   onEndShift,
-  onUpdatePin,
   onClose,
 }) => {
   // Form states for Starting Shift
@@ -51,12 +47,6 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
   const [customShiftTitle, setCustomShiftTitle] = useState<string>('');
   const [startingFloat, setStartingFloat] = useState<number>(50.0);
   const [notes, setNotes] = useState('');
-
-  // Form states for Changing PIN
-  const [showPinChange, setShowPinChange] = useState(false);
-  const [newPinInput, setNewPinInput] = useState('');
-  const [pinChangeSuccess, setPinChangeSuccess] = useState(false);
-  const [pinError, setPinError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -85,27 +75,6 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
 
     onStartShift(newShift);
     onClose();
-  };
-
-  const handleSaveNewPin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPinError(null);
-    if (!/^\d{6}$/.test(newPinInput)) {
-      setPinError('PIN code must be exactly 6 numeric digits.');
-      return;
-    }
-    if (new Set(newPinInput.split('')).size !== 6) {
-      setPinError('No duplicate numbers allowed in PIN! Every digit must be unique (e.g. 123456).');
-      return;
-    }
-    onUpdatePin(newPinInput);
-    setPinChangeSuccess(true);
-    setTimeout(() => {
-      setPinChangeSuccess(false);
-      setShowPinChange(false);
-      setNewPinInput('');
-      setPinError(null);
-    }, 1200);
   };
 
   return (
@@ -276,58 +245,6 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
             </button>
           </form>
         )}
-
-        {/* Security PIN Code Management Section */}
-        <div className="mt-6 border-t border-slate-800 pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-amber-400" />
-              <span className="text-xs font-bold text-slate-300">Staff POS PIN Code:</span>
-              <span className="text-xs font-mono font-bold text-emerald-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                {staffPin}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowPinChange(!showPinChange)}
-              className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1"
-            >
-              <KeyRound className="w-3 h-3" /> {showPinChange ? 'Cancel' : 'Change PIN'}
-            </button>
-          </div>
-
-          {showPinChange && (
-            <form onSubmit={handleSaveNewPin} className="mt-3 bg-slate-950 p-3 rounded-xl border border-slate-800 animate-in fade-in space-y-2">
-              <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                Enter New 6-Digit Security PIN (No Duplicate Digits)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  maxLength={6}
-                  value={newPinInput}
-                  onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="e.g. 123456"
-                  required
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm font-mono text-center tracking-widest text-emerald-400 focus:outline-none focus:border-emerald-500 flex-1"
-                />
-                <button
-                  type="submit"
-                  disabled={newPinInput.length !== 6}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  {pinChangeSuccess ? <Check className="w-4 h-4 text-slate-950" /> : 'Save PIN'}
-                </button>
-              </div>
-              {pinError && (
-                <p className="text-[10px] text-rose-400 font-bold mt-1">⚠️ {pinError}</p>
-              )}
-              {pinChangeSuccess && (
-                <p className="text-[10px] text-emerald-400 font-bold mt-1">✓ 6-Digit Security PIN updated!</p>
-              )}
-            </form>
-          )}
-        </div>
       </div>
     </div>
   );

@@ -778,53 +778,36 @@ apiRouter.post('/sync', (req, res, next) => {
   try {
     const { store: incomingStore } = req.body || {};
     const bizName = getBusinessNameFromReq(req);
-    const key = normalizeBusinessKey(bizName);
     const currentStore = loadData(bizName);
 
     if (incomingStore && typeof incomingStore === 'object') {
-      const mergedMembers = Array.from(
-        new Map(
-          [...(currentStore.members || []), ...(incomingStore.members || [])].map((m) => [m.memberId, m])
-        ).values()
-      );
-      const mergedAttendance = Array.from(
-        new Map(
-          [...(currentStore.attendance || []), ...(incomingStore.attendance || [])].map((a) => [
-            `${a.timestamp}-${a.memberId || a.name}`,
-            a,
-          ])
-        ).values()
-      );
-      const mergedSales = Array.from(
-        new Map(
-          [...(currentStore.sales || []), ...(incomingStore.sales || [])].map((s) => [
-            s.id || `${s.timestamp}-${s.buyerName}`,
-            s,
-          ])
-        ).values()
-      );
-      const mergedExpenses = Array.from(
-        new Map(
-          [...(currentStore.expenses || []), ...(incomingStore.expenses || [])].map((e) => [
-            e.id || `${e.timestamp}-${e.description}`,
-            e,
-          ])
-        ).values()
-      );
-
-      const mergedStore: GymDataStore = {
+      const updatedStore: GymDataStore = {
         ...currentStore,
         ...incomingStore,
-        members: mergedMembers,
-        attendance: mergedAttendance,
-        sales: mergedSales,
-        expenses: mergedExpenses,
+        members: incomingStore.members || currentStore.members || [],
+        attendance: incomingStore.attendance || currentStore.attendance || [],
+        sales: incomingStore.sales || currentStore.sales || [],
+        expenses: incomingStore.expenses || currentStore.expenses || [],
         registeredStaff: incomingStore.registeredStaff || currentStore.registeredStaff || [],
         activeShift: incomingStore.activeShift !== undefined ? incomingStore.activeShift : currentStore.activeShift,
       };
 
-      saveData(mergedStore, bizName);
-      return res.json({ success: true, store: mergedStore });
+      saveData(updatedStore, bizName);
+
+      // Notify any connected SSE clients
+      const sseMsg = JSON.stringify({
+        type: 'data_updated',
+        timestamp: Date.now(),
+        businessName: bizName,
+        store: updatedStore,
+      });
+      for (const client of sseClients) {
+        try {
+          client.write(`data: ${sseMsg}\n\n`);
+        } catch {}
+      }
+
+      return res.json({ success: true, store: updatedStore });
     }
 
     res.json({ success: true, store: currentStore });
@@ -965,7 +948,7 @@ apiRouter.post('/checkin/phone', (req, res, next) => {
     });
 
     saveData(store, bizName);
-    return res.json({ success: true, message: `Welcome back, ${member.name}!` });
+    return res.json({ success: true, message: `Welcome back, ${member.name}!`, store });
   } catch (err) {
     next(err);
   }
@@ -998,7 +981,7 @@ apiRouter.post('/checkin/id', (req, res, next) => {
     });
 
     saveData(store, bizName);
-    return res.json({ success: true, message: `Welcome back, ${member.name}!` });
+    return res.json({ success: true, message: `Welcome back, ${member.name}!`, store });
   } catch (err) {
     next(err);
   }

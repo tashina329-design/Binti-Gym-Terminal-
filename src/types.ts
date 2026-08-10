@@ -49,6 +49,17 @@ export interface PTDetail {
   amount: number;
 }
 
+export interface GymDataStore {
+  members: Member[];
+  attendance: any[];
+  expenses: any[];
+  sales: any[];
+  registeredStaff?: RegisteredStaff[];
+  activeShift?: StaffShift | null;
+  staffPin?: string;
+  availableStores?: string[];
+}
+
 export interface DashboardData {
   totalRevenue: number;
   totalExpenses: number;
@@ -71,6 +82,7 @@ export interface DashboardData {
   bibdIn: number;
   ptDetails: PTDetail[];
   viewDate: string; // YYYY-MM-DD
+  store?: GymDataStore;
 }
 
 export interface CheckInResponse {

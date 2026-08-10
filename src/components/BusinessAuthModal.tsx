@@ -116,7 +116,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
             localStorage.setItem('gym_data_store_v1', JSON.stringify(res.store));
           } catch {}
         }
-        await broadcastLiveSync(undefined, res.store, activeName);
+        broadcastLiveSync(undefined, res.store, activeName);
         onAuthenticated(activeName, pin);
         return;
       } else if (res && res.message && res.message.includes('Incorrect 4-digit PIN')) {
@@ -134,7 +134,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
             localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
           } catch {}
         }
-        await broadcastLiveSync(undefined, cloudRes.store, activeName);
+        broadcastLiveSync(undefined, cloudRes.store, activeName);
         onAuthenticated(activeName, pin);
       } else {
         setError(cloudRes.message || 'Authentication failed. Check business name and 4-digit PIN.');
@@ -151,7 +151,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
               localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
             } catch {}
           }
-          await broadcastLiveSync(undefined, cloudRes.store, activeName);
+          broadcastLiveSync(undefined, cloudRes.store, activeName);
           onAuthenticated(activeName, pin);
           return;
         } else {

@@ -19,13 +19,13 @@ import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
 import { PinCodeModal } from './components/PinCodeModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
-import { apiFetch, loadClientStore, saveClientStore } from './lib/api';
+import { apiFetch, loadClientStore, saveClientStore, getBruneiTodayIsoDate } from './lib/api';
 import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, RegisteredStaff, PushNotification } from './types';
 
 export default function App() {
-  const getTodayIsoDate = () => new Date().toISOString().split('T')[0];
+  const getTodayIsoDate = () => getBruneiTodayIsoDate();
 
   const [selectedDate, setSelectedDate] = useState<string>(getTodayIsoDate());
   const [activeTab, setActiveTab] = useState<TabId>('sales');
@@ -210,13 +210,6 @@ export default function App() {
       setIsCheckinMode(true);
     }
   }, []);
-
-  // Auto-prompt Staff Shift modal when terminal is opened without active staff shift
-  useEffect(() => {
-    if (!activeShift && !isCheckinMode) {
-      setShowShiftModal(true);
-    }
-  }, [activeShift, isCheckinMode]);
 
   // Fetch Dashboard Data
   const loadDashboard = useCallback(async (dateToFetch?: string) => {
@@ -849,74 +842,51 @@ export default function App() {
           onToggleCheckinMode={() => setIsCheckinMode(true)}
         />
 
-        {/* Active Tab View Content (Terminal locked when no active staff shift) */}
+        {/* Active Tab View Content */}
         <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xl">
-          {!activeShift ? (
-            <div className="text-center py-12 px-4 space-y-5 max-w-md mx-auto">
-              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-xl">
-                <Lock className="w-8 h-8" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-xl font-bold text-white">Active Staff Shift Required</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Terminal access is restricted until a staff member logs in and starts an active duty shift.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowShiftModal(true)}
-                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all cursor-pointer"
-              >
-                <Play className="w-4 h-4 fill-slate-950" /> Start Staff Shift
-              </button>
-            </div>
-          ) : (
-            <>
-              {activeTab === 'sales' && (
-                <SalesTab
-                  data={dashboardData}
-                  onDeleteSale={handleDeleteSale}
-                  onDeleteAttendance={handleDeleteAttendance}
-                  onDeleteExpense={handleDeleteExpense}
-                />
-              )}
-
-              {activeTab === 'staffcheckin' && (
-                <PhoneCheckinTab
-                  onCheckinPhone={handleCheckinPhone}
-                  onCheckinId={handleCheckinId}
-                />
-              )}
-
-              {activeTab === 'pos' && <PosTab onRecordPOS={handleRecordPOS} />}
-
-              {activeTab === 'classes' && <ClassesTab onRecordClass={handleRecordClass} />}
-
-              {activeTab === 'pt' && (
-                <PersonalTrainerTab
-                  onRecordPTIn={handleRecordPTIn}
-                  onRecordPTOut={handleRecordPTOut}
-                />
-              )}
-
-              {activeTab === 'walkin' && <WalkInTab onRecordWalkIn={handleRecordWalkIn} />}
-
-              {activeTab === 'membership' && (
-                <MemberRegistrationTab
-                  data={dashboardData}
-                  onRegisterMember={handleRegisterMember}
-                  onOpenRenewModal={(m) => setRenewMember(m)}
-                  onDeleteMember={handleDeleteMember}
-                />
-              )}
-
-              {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
-
-              {activeTab === 'qrposter' && <QrPosterTab />}
-
-              {activeTab === 'sheets' && <GoogleSheetsTab dashboardData={dashboardData} />}
-            </>
+          {activeTab === 'sales' && (
+            <SalesTab
+              data={dashboardData}
+              onDeleteSale={handleDeleteSale}
+              onDeleteAttendance={handleDeleteAttendance}
+              onDeleteExpense={handleDeleteExpense}
+            />
           )}
+
+          {activeTab === 'staffcheckin' && (
+            <PhoneCheckinTab
+              onCheckinPhone={handleCheckinPhone}
+              onCheckinId={handleCheckinId}
+            />
+          )}
+
+          {activeTab === 'pos' && <PosTab onRecordPOS={handleRecordPOS} />}
+
+          {activeTab === 'classes' && <ClassesTab onRecordClass={handleRecordClass} />}
+
+          {activeTab === 'pt' && (
+            <PersonalTrainerTab
+              onRecordPTIn={handleRecordPTIn}
+              onRecordPTOut={handleRecordPTOut}
+            />
+          )}
+
+          {activeTab === 'walkin' && <WalkInTab onRecordWalkIn={handleRecordWalkIn} />}
+
+          {activeTab === 'membership' && (
+            <MemberRegistrationTab
+              data={dashboardData}
+              onRegisterMember={handleRegisterMember}
+              onOpenRenewModal={(m) => setRenewMember(m)}
+              onDeleteMember={handleDeleteMember}
+            />
+          )}
+
+          {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
+
+          {activeTab === 'qrposter' && <QrPosterTab />}
+
+          {activeTab === 'sheets' && <GoogleSheetsTab dashboardData={dashboardData} />}
         </div>
       </div>
 

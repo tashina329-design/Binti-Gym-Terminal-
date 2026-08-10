@@ -17,12 +17,12 @@ import { GoogleSheetsTab } from './components/tabs/GoogleSheetsTab';
 import { QuickRenewModal } from './components/QuickRenewModal';
 import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
-import { PinCodeModal } from './components/PinCodeModal';
+import { BusinessAuthModal } from './components/BusinessAuthModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
 import { apiFetch, loadClientStore, saveClientStore, getBruneiTodayIsoDate } from './lib/api';
 import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
 
-import { DashboardData, Member, CheckInResponse, StaffShift, RegisteredStaff, PushNotification } from './types';
+import { DashboardData, Member, CheckInResponse, StaffShift, PushNotification } from './types';
 
 export default function App() {
   const getTodayIsoDate = () => getBruneiTodayIsoDate();
@@ -61,29 +61,45 @@ export default function App() {
     };
   }, []);
 
-  // Registered Staff state (supports 6-digit PIN with no duplicate numbers)
-  const [registeredStaff, setRegisteredStaff] = useState<RegisteredStaff[]>(() => {
-    try {
-      const saved = localStorage.getItem('gym_registered_staff');
-      if (saved) {
-        const parsed: RegisteredStaff[] = JSON.parse(saved);
-        return parsed.filter(
-          (s) => !s.name.toLowerCase().includes('alex') && !s.name.toLowerCase().includes('staff')
-        );
-      }
-    } catch {}
-    return [];
-  });
-
-  // Security PIN and Staff Shift state (persisted in localStorage)
-  const [staffPin, setStaffPin] = useState<string>(() => {
-    return localStorage.getItem('gym_staff_pin') || '123456';
-  });
-
   // Multi-Store Terminal State (persisted in localStorage)
-  const [currentStore, setCurrentStore] = useState<string>(() => {
-    return localStorage.getItem('current_store_name') || 'Binti Gym';
+  const [currentBusinessName, setCurrentBusinessName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('current_business_name') || '';
+    } catch {
+      return '';
+    }
   });
+
+  const [currentBusinessPin, setCurrentBusinessPin] = useState<string>(() => {
+    try {
+      return localStorage.getItem('current_business_pin') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [showBusinessAuthModal, setShowBusinessAuthModal] = useState<boolean>(
+    () => !currentBusinessName || !currentBusinessPin
+  );
+
+  const [currentStore, setCurrentStore] = useState<string>(() => {
+    return currentBusinessName || localStorage.getItem('current_store_name') || 'Binti Gym';
+  });
+
+  const handleBusinessAuthenticated = (bizName: string, pin: string) => {
+    setCurrentBusinessName(bizName);
+    setCurrentBusinessPin(pin);
+    setCurrentStore(bizName);
+    localStorage.setItem('current_store_name', bizName);
+    localStorage.setItem('current_business_name', bizName);
+    localStorage.setItem('current_business_pin', pin);
+    setShowBusinessAuthModal(false);
+
+    // Reload store data for this business
+    fetchCloudStore(bizName).then(() => {
+      loadDashboard(selectedDate);
+    });
+  };
 
   const [availableStores, setAvailableStores] = useState<string[]>(() => {
     try {
@@ -133,28 +149,6 @@ export default function App() {
     }, 6000);
   };
 
-  const handleRegisterStaff = (newStaff: RegisteredStaff) => {
-    let updatedStaffList: RegisteredStaff[] = [];
-    setRegisteredStaff((prev) => {
-      updatedStaffList = [...prev, newStaff];
-      localStorage.setItem('gym_registered_staff', JSON.stringify(updatedStaffList));
-      return updatedStaffList;
-    });
-    setStaffPin(newStaff.pin);
-    localStorage.setItem('gym_staff_pin', newStaff.pin);
-
-    // Save & broadcast live sync to Cloud Firestore so all devices (mobile, tablets, PC) receive the new store PIN immediately
-    const store = loadClientStore();
-    store.registeredStaff = updatedStaffList.length > 0 ? updatedStaffList : [...registeredStaff, newStaff];
-    store.staffPin = newStaff.pin;
-    if (!store.availableStores) store.availableStores = availableStores;
-    saveClientStore(store, {
-      type: 'shift',
-      title: '🔑 New Store Terminal Registered',
-      message: `Store terminal "${newStaff.name}" registered with 6-digit PIN.`,
-    });
-  };
-
   const [activeShift, setActiveShift] = useState<StaffShift | null>(() => {
     try {
       const saved = localStorage.getItem('gym_active_shift');
@@ -165,7 +159,6 @@ export default function App() {
   });
 
   const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
-  const [showPinModal, setShowPinModal] = useState<boolean>(false);
 
   // Quick renew modal state
   const [renewMember, setRenewMember] = useState<Member | null>(null);
@@ -227,14 +220,8 @@ export default function App() {
 
   // Initial fetch of central cloud database store on mount
   useEffect(() => {
-    fetchCloudStore().then((cloudStore) => {
+    fetchCloudStore(currentBusinessName).then((cloudStore) => {
       if (cloudStore) {
-        if (cloudStore.registeredStaff) {
-          setRegisteredStaff(cloudStore.registeredStaff);
-        }
-        if (cloudStore.staffPin) {
-          setStaffPin(cloudStore.staffPin);
-        }
         if (cloudStore.availableStores) {
           setAvailableStores(cloudStore.availableStores);
         }
@@ -244,7 +231,7 @@ export default function App() {
         loadDashboard(selectedDate);
       }
     });
-  }, [selectedDate, loadDashboard]);
+  }, [selectedDate, loadDashboard, currentBusinessName]);
 
   useEffect(() => {
     loadDashboard(selectedDate);
@@ -256,12 +243,6 @@ export default function App() {
       (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => {
         // Update local React state if remote store is passed
         if (remoteStore) {
-          if (remoteStore.registeredStaff) {
-            setRegisteredStaff(remoteStore.registeredStaff);
-          }
-          if (remoteStore.staffPin) {
-            setStaffPin(remoteStore.staffPin);
-          }
           if (remoteStore.availableStores) {
             setAvailableStores(remoteStore.availableStores);
           }
@@ -312,11 +293,12 @@ export default function App() {
       },
       (status) => {
         setSyncStatus(status);
-      }
+      },
+      currentBusinessName
     );
 
     return () => unsubscribe();
-  }, [selectedDate, loadDashboard]);
+  }, [selectedDate, loadDashboard, currentBusinessName]);
 
   // Periodic Auto-refresh fallback every 30s
   useEffect(() => {
@@ -474,7 +456,7 @@ export default function App() {
       type: 'pos',
       title: '🛒 POS Item Sold',
       message: `Sold ${data.itemName || 'Item'} (x${data.qty || 1}) - $${data.amount}`,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -492,7 +474,7 @@ export default function App() {
       type: 'class',
       title: '🧘 Class Pass Sold',
       message: `Class pass for ${data.className || 'Class'} recorded for ${data.clientName || 'Client'}`,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -510,7 +492,7 @@ export default function App() {
       type: 'pt',
       title: '💪 Personal Training Package',
       message: `PT Package: ${data.clientName} with Coach ${data.trainerName}`,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -528,7 +510,7 @@ export default function App() {
       type: 'pt',
       title: '💸 PT Payout Recorded',
       message: `PT payout for Coach ${data.trainerName}: $${data.amount}`,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -546,7 +528,7 @@ export default function App() {
       type: 'expense',
       title: '🧾 Expense Logged',
       message: `Expense logged: ${data.description || data.category} ($${data.amount})`,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -573,7 +555,7 @@ export default function App() {
       title: '⭐ New Member Registered',
       message: `Registered new member ${data.name} (${data.planType})`,
       memberName: data.name,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -597,7 +579,7 @@ export default function App() {
       title: '🔄 Membership Renewed',
       message: `Renewed membership for #${data.memberId} (${data.planType})`,
       memberId: data.memberId,
-    });
+    }, loadClientStore());
 
     setActiveTab('sales');
     return updated;
@@ -672,35 +654,49 @@ export default function App() {
       });
 
       setDashboardData(updated);
-      broadcastLiveSync();
+      broadcastLiveSync(undefined, loadClientStore());
     } catch (err: any) {
       console.error('Delete error:', err);
     }
   };
 
-  const handleStartShift = (shift: StaffShift) => {
+  const handleStartShift = async (shift: StaffShift) => {
     setActiveShift(shift);
     localStorage.setItem('gym_active_shift', JSON.stringify(shift));
-  };
-
-  const handleEndShift = () => {
-    setActiveShift(null);
-    localStorage.removeItem('gym_active_shift');
+    const store = loadClientStore();
+    store.activeShift = shift;
+    saveClientStore(store, {
+      type: 'shift',
+      title: '🟢 Duty Shift Started',
+      message: `${shift.staffName} started shift (${shift.shiftTitle || 'Duty Shift'})!`,
+    });
+    try {
+      await apiFetch('/api/staff/shift/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shift }),
+      });
+    } catch (e) {}
     setShowShiftModal(false);
   };
 
-  const handleUpdatePin = (newPin: string) => {
-    setStaffPin(newPin);
-    localStorage.setItem('gym_staff_pin', newPin);
-
-    // Save and broadcast to Cloud Firestore
+  const handleEndShift = async () => {
+    setActiveShift(null);
+    localStorage.removeItem('gym_active_shift');
     const store = loadClientStore();
-    store.staffPin = newPin;
+    store.activeShift = null;
     saveClientStore(store, {
       type: 'shift',
-      title: '🔐 Terminal PIN Updated',
-      message: 'Store terminal PIN updated successfully across devices.',
+      title: '🔴 Duty Shift Ended',
+      message: 'Active duty shift ended.',
     });
+    try {
+      await apiFetch('/api/staff/shift/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (e) {}
+    setShowShiftModal(false);
   };
 
   // Standalone Customer Entrance Check-In Terminal Mode
@@ -753,11 +749,9 @@ export default function App() {
               window.history.pushState(null, '', window.location.pathname);
             }
           }}
-          staffPin={staffPin}
-          registeredStaff={registeredStaff}
-          currentStore={currentStore}
+          currentStore={currentBusinessName || currentStore}
           availableStores={availableStores}
-          onRegisterStaff={handleRegisterStaff}
+          currentBusinessPin={currentBusinessPin}
         />
       </div>
     );
@@ -788,7 +782,7 @@ export default function App() {
                   {activePushBanner.message}
                 </p>
                 <span className="inline-block text-[10px] font-semibold text-emerald-400 mt-1">
-                  ✓ Logged to Binti Gym Operational Records
+                  ✓ Logged to Operational Records
                 </span>
               </div>
             </div>
@@ -811,13 +805,13 @@ export default function App() {
           isCheckinMode={isCheckinMode}
           activeShift={activeShift}
           notifications={notifications}
-          currentStore={currentStore}
+          currentStore={currentBusinessName || currentStore}
           syncStatus={syncStatus}
           onOpenShiftModal={() => setShowShiftModal(true)}
-          onLockTerminal={() => setShowPinModal(true)}
+          onLockTerminal={() => setIsCheckinMode(true)}
           onToggleCheckinMode={() => setIsCheckinMode(true)}
           onRefresh={() => loadDashboard(selectedDate)}
-          onOpenStoreLogin={() => setShowPinModal(true)}
+          onOpenStoreLogin={() => setShowBusinessAuthModal(true)}
         />
 
         {/* Controls Toolbar */}
@@ -901,63 +895,11 @@ export default function App() {
       <StaffShiftModal
         isOpen={showShiftModal}
         activeShift={activeShift}
-        staffPin={staffPin}
         dashboardData={dashboardData}
         currentStore={currentStore}
         onStartShift={handleStartShift}
         onEndShift={handleEndShift}
-        onUpdatePin={handleUpdatePin}
         onClose={() => setShowShiftModal(false)}
-      />
-
-      {/* Security Pin Code Verification & Multi-Store Terminal Login Modal */}
-      <PinCodeModal
-        isOpen={showPinModal}
-        correctPin={staffPin}
-        registeredStaff={registeredStaff}
-        selectedStoreName={currentStore}
-        availableStores={availableStores}
-        onRegisterStaff={handleRegisterStaff}
-        onSuccess={(authenticatedStaff, storeName) => {
-          const finalStore = storeName?.trim() || currentStore;
-          setCurrentStore(finalStore);
-          localStorage.setItem('current_store_name', finalStore);
-          
-          let updatedStores = availableStores;
-          if (!availableStores.includes(finalStore)) {
-            updatedStores = [...availableStores, finalStore];
-            setAvailableStores(updatedStores);
-            localStorage.setItem('gym_available_stores', JSON.stringify(updatedStores));
-          }
-
-          // Ensure store list & staff details are saved and synced to Cloud Firestore
-          const store = loadClientStore();
-          store.availableStores = updatedStores;
-          if (authenticatedStaff) {
-            if (!store.registeredStaff.some((s) => s.pin === authenticatedStaff.pin)) {
-              store.registeredStaff = [...store.registeredStaff, authenticatedStaff];
-            }
-          }
-          saveClientStore(store, {
-            type: 'shift',
-            title: '🏬 Store Terminal Active',
-            message: `Logged into store terminal "${finalStore}".`,
-          });
-
-          setShowPinModal(false);
-          setIsCheckinMode(false);
-          if (authenticatedStaff && !activeShift) {
-            handleStartShift({
-              id: 'shift-' + Date.now(),
-              staffName: authenticatedStaff.name,
-              shiftTitle: 'Morning shift',
-              startTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
-              startTimestamp: Date.now(),
-              startingFloat: 50.0,
-            });
-          }
-        }}
-        onCancel={() => setShowPinModal(false)}
       />
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
@@ -997,6 +939,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Store Registration / Multi-Device Business Login Modal */}
+      <BusinessAuthModal
+        isOpen={showBusinessAuthModal}
+        currentBusinessName={currentBusinessName}
+        canClose={!!currentBusinessName && !!currentBusinessPin}
+        onClose={() => setShowBusinessAuthModal(false)}
+        onAuthenticated={handleBusinessAuthenticated}
+      />
     </div>
   );
 }

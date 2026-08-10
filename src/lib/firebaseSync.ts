@@ -89,7 +89,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 export async function fetchStoresFromCloud(): Promise<string[]> {
   try {
     const regDoc = doc(db, 'gym', 'registry');
-    const snap = await withTimeout(getDoc(regDoc), 2500, null as any);
+    const snap = await withTimeout(getDoc(regDoc), 8000, null as any);
     if (snap && snap.exists && snap.exists()) {
       const data = snap.data();
       if (Array.isArray(data.stores)) {
@@ -110,7 +110,7 @@ export async function authenticateCloudBusinessStore(
   const docRef = getStoreDocRef(cleanName);
 
   try {
-    const snapshot = await withTimeout(getDoc(docRef), 3000, null as any);
+    const snapshot = await withTimeout(getDoc(docRef), 8000, null as any);
 
     if (mode === 'login') {
       if (snapshot && snapshot.exists && snapshot.exists()) {
@@ -253,7 +253,7 @@ export async function fetchCloudStore(businessName?: string): Promise<GymDataSto
   try {
     const activeBiz = businessName || getStoredBusinessName();
     const storeDocRef = getStoreDocRef(activeBiz);
-    const snapshot = await withTimeout(getDoc(storeDocRef), 2500, null as any);
+    const snapshot = await withTimeout(getDoc(storeDocRef), 8000, null as any);
     if (snapshot && snapshot.exists && snapshot.exists()) {
       const data = snapshot.data();
       if (data.store) {
@@ -515,19 +515,19 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
   (async () => {
     try {
       const storeDocRef = getStoreDocRef(activeBiz);
-      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 3000, null);
+      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 10000, null);
 
       // Keep cloud registry doc updated
       try {
         const regDoc = doc(db, 'gym', 'registry');
-        const regSnap = await withTimeout(getDoc(regDoc), 2000, null as any);
+        const regSnap = await withTimeout(getDoc(regDoc), 5000, null as any);
         const existingStores: string[] =
           regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
             ? regSnap.data().stores
             : ['Binti Gym'];
         if (!existingStores.includes(activeBiz)) {
           existingStores.push(activeBiz);
-          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 2000, null);
+          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 5000, null);
         }
       } catch {}
     } catch (err) {

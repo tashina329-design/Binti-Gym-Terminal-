@@ -717,15 +717,31 @@ apiRouter.post('/stores/login', (req, res, next) => {
     const container = loadRootContainer();
     const key = normalizeBusinessKey(cleanName);
 
-    const biz = container.businesses[key];
+    let biz = container.businesses[key];
+
+    // If business is not yet registered in server state, auto-register/adopt it with this PIN
     if (!biz) {
-      return res.status(404).json({
-        success: false,
-        message: `Business "${cleanName}" not found. Please click "Register New Business" to create it.`,
-      });
+      biz = {
+        name: cleanName,
+        pin: cleanPin,
+        registeredAt: new Date().toISOString(),
+      };
+      container.businesses[key] = biz;
+      if (!container.stores[key]) {
+        container.stores[key] = {
+          members: [],
+          attendance: [],
+          sales: [],
+          expenses: [],
+          registeredStaff: [],
+          activeShift: null,
+          staffPin: cleanPin,
+        };
+      }
+      saveRootContainer(container);
     }
 
-    if (biz.pin !== cleanPin) {
+    if (biz.pin && biz.pin !== cleanPin) {
       return res.status(401).json({
         success: false,
         message: `Incorrect 4-digit PIN code for "${biz.name}". Access denied.`,

@@ -18,19 +18,16 @@ import {
   Sparkles,
   Lock,
 } from 'lucide-react';
-import { CheckInResponse, MemberMatch, DashboardData, RegisteredStaff } from '../types';
-import { PinCodeModal } from './PinCodeModal';
+import { CheckInResponse, MemberMatch, DashboardData } from '../types';
 
 interface EntranceCheckInViewProps {
   onCheckinPhone: (phone: string) => Promise<CheckInResponse>;
   onCheckinId: (memberId: string) => Promise<CheckInResponse>;
   onRecordWalkIn?: (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => Promise<DashboardData>;
   onBackToStaffPOS?: () => void;
-  staffPin?: string;
-  registeredStaff?: RegisteredStaff[];
   currentStore?: string;
   availableStores?: string[];
-  onRegisterStaff?: (staff: RegisteredStaff) => void;
+  currentBusinessPin?: string;
 }
 
 export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
@@ -38,17 +35,17 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
   onCheckinId,
   onRecordWalkIn,
   onBackToStaffPOS,
-  staffPin = '123456',
-  registeredStaff = [],
   currentStore = 'Binti Gym',
   availableStores,
-  onRegisterStaff = () => {},
+  currentBusinessPin = '1234',
 }) => {
   // Mode: 'member' check-in vs 'walkin' guest registration
   const [terminalMode, setTerminalMode] = useState<'member' | 'walkin'>('member');
 
-  // Staff POS PIN lock modal state
-  const [showPinModal, setShowPinModal] = useState<boolean>(false);
+  // Staff POS 4-digit PIN lock modal state for exiting kiosk mode
+  const [showExitPinModal, setShowExitPinModal] = useState<boolean>(false);
+  const [exitPinInput, setExitPinInput] = useState<string>('');
+  const [exitPinError, setExitPinError] = useState<string | null>(null);
 
   // Member check-in state
   const [memberPhone, setMemberPhone] = useState('');
@@ -218,11 +215,15 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
 
           {onBackToStaffPOS && (
             <button
-              onClick={() => setShowPinModal(true)}
-              className="px-2.5 py-1 sm:px-3 sm:py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 border border-rose-800/60 transition-colors shadow-sm cursor-pointer"
-              title="Lock Terminal & Require 6-Digit PIN"
+              onClick={() => {
+                setExitPinInput('');
+                setExitPinError(null);
+                setShowExitPinModal(true);
+              }}
+              className="px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors shadow-sm cursor-pointer"
+              title="Return to Staff Dashboard"
             >
-              <Lock className="w-3.5 h-3.5 text-rose-400" /> Log Out / Lock Terminal
+              <Lock className="w-3.5 h-3.5 text-emerald-400" /> Exit Kiosk / Staff POS
             </button>
           )}
         </div>
@@ -582,20 +583,124 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
         </div>
       )}
 
-      {/* Pin Code Lock Modal */}
-      <PinCodeModal
-        isOpen={showPinModal}
-        correctPin={staffPin}
-        registeredStaff={registeredStaff}
-        selectedStoreName={currentStore}
-        availableStores={availableStores}
-        onRegisterStaff={onRegisterStaff}
-        onSuccess={() => {
-          setShowPinModal(false);
-          if (onBackToStaffPOS) onBackToStaffPOS();
-        }}
-        onCancel={() => setShowPinModal(false)}
-      />
+      {/* 4-DIGIT EXIT KIOSK PIN MODAL */}
+      {showExitPinModal && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-5">
+            <div className="text-center space-y-2">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Lock className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white">Exit Kiosk Mode</h3>
+              <p className="text-xs text-slate-400">Enter 4-digit Business PIN to unlock Staff POS</p>
+            </div>
+
+            {exitPinError && (
+              <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl text-center font-medium animate-shake">
+                {exitPinError}
+              </div>
+            )}
+
+            {/* PIN Dots */}
+            <div className="flex justify-center items-center gap-3 py-1">
+              {[0, 1, 2, 3].map((idx) => {
+                const filled = exitPinInput.length > idx;
+                return (
+                  <div
+                    key={idx}
+                    className={`w-11 h-13 rounded-xl border flex items-center justify-center text-xl font-bold transition-all ${
+                      filled
+                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-sm'
+                        : 'border-slate-800 bg-slate-950 text-slate-600'
+                    }`}
+                  >
+                    {filled ? '●' : ''}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Numeric Keypad */}
+            <div className="grid grid-cols-3 gap-2">
+              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+                <button
+                  key={digit}
+                  type="button"
+                  onClick={() => {
+                    if (exitPinInput.length < 4) {
+                      const nextPin = exitPinInput + digit;
+                      setExitPinInput(nextPin);
+                      setExitPinError(null);
+                      if (nextPin.length === 4) {
+                        if (nextPin === currentBusinessPin) {
+                          setShowExitPinModal(false);
+                          if (onBackToStaffPOS) onBackToStaffPOS();
+                        } else {
+                          setExitPinError('Incorrect 4-digit PIN code.');
+                          setExitPinInput('');
+                        }
+                      }
+                    }
+                  }}
+                  className="py-3 bg-slate-800/80 hover:bg-slate-700/80 active:bg-emerald-500 active:text-slate-950 text-white font-bold text-lg rounded-xl transition shadow-sm border border-slate-700/50"
+                >
+                  {digit}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setExitPinInput('');
+                  setExitPinError(null);
+                }}
+                className="py-3 bg-slate-800/40 hover:bg-slate-800 text-slate-400 text-xs font-semibold rounded-xl transition"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (exitPinInput.length < 4) {
+                    const nextPin = exitPinInput + '0';
+                    setExitPinInput(nextPin);
+                    setExitPinError(null);
+                    if (nextPin.length === 4) {
+                      if (nextPin === currentBusinessPin) {
+                        setShowExitPinModal(false);
+                        if (onBackToStaffPOS) onBackToStaffPOS();
+                      } else {
+                        setExitPinError('Incorrect 4-digit PIN code.');
+                        setExitPinInput('');
+                      }
+                    }
+                  }
+                }}
+                className="py-3 bg-slate-800/80 hover:bg-slate-700/80 active:bg-emerald-500 active:text-slate-950 text-white font-bold text-lg rounded-xl transition shadow-sm border border-slate-700/50"
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExitPinInput((prev) => prev.slice(0, -1));
+                  setExitPinError(null);
+                }}
+                className="py-3 bg-slate-800/40 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl transition flex items-center justify-center"
+              >
+                ⌫
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowExitPinModal(false)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition"
+            >
+              Cancel & Stay in Kiosk Mode
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="text-center text-[10px] text-slate-600 max-w-md mx-auto w-full mt-1 shrink-0">

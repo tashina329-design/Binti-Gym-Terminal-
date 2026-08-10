@@ -72,9 +72,6 @@ export function normalizeStoreKey(businessName?: string): string {
 
 function getStoreDocRef(businessName?: string) {
   const key = normalizeStoreKey(businessName);
-  if (key === 'binti_gym') {
-    return doc(db, 'gym', 'store');
-  }
   return doc(db, 'gym_stores', key);
 }
 
@@ -344,9 +341,13 @@ export function subscribeLiveSync(
         if (snapshot.exists()) {
           const data = snapshot.data();
           const updatedAt = data.updatedAt || 0;
-          if (updatedAt > subscriberLastTimestamp) {
-            subscriberLastTimestamp = updatedAt;
-            const isRemote = data.deviceId ? data.deviceId !== myDeviceId : true;
+          const isRemote = data.deviceId ? data.deviceId !== myDeviceId : false;
+
+          // Always accept remote changes or newer timestamps
+          if (isRemote || updatedAt > subscriberLastTimestamp) {
+            if (updatedAt > subscriberLastTimestamp) {
+              subscriberLastTimestamp = updatedAt;
+            }
 
             // Sync remote store into local storage if present
             if (data.store) {
@@ -391,15 +392,19 @@ export function subscribeLiveSync(
 
   // 2. Listen to BroadcastChannel for local cross-tab instant sync
   const handleBroadcast = (event: MessageEvent) => {
-    if (event.data && event.data.updatedAt > subscriberLastTimestamp) {
-      subscriberLastTimestamp = event.data.updatedAt;
+    if (event.data) {
       const isRemote = event.data.deviceId !== myDeviceId;
-      if (event.data.store) {
-        try {
-          localStorage.setItem('gym_data_store_v1', JSON.stringify(event.data.store));
-        } catch {}
+      if (isRemote || event.data.updatedAt > subscriberLastTimestamp) {
+        if (event.data.updatedAt > subscriberLastTimestamp) {
+          subscriberLastTimestamp = event.data.updatedAt;
+        }
+        if (event.data.store) {
+          try {
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(event.data.store));
+          } catch {}
+        }
+        onUpdate(event.data.lastEvent || undefined, isRemote, event.data.store || undefined);
       }
-      onUpdate(event.data.lastEvent || undefined, isRemote, event.data.store || undefined);
     }
   };
 
@@ -407,35 +412,16 @@ export function subscribeLiveSync(
     syncChannel.addEventListener('message', handleBroadcast);
   }
 
-  // 3. Listen to SSE Server-Sent Events if connected to Express backend
-  let eventSource: EventSource | null = null;
-  if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
-    try {
-      eventSource = new EventSource('/api/events');
-      eventSource.onmessage = (e) => {
-        try {
-          const parsed = JSON.parse(e.data);
-          if (parsed.type === 'data_updated' && parsed.timestamp > subscriberLastTimestamp) {
-            subscriberLastTimestamp = parsed.timestamp;
-            const isRemote = parsed.deviceId ? parsed.deviceId !== myDeviceId : true;
-            onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
-          }
-        } catch {}
-      };
-      eventSource.onerror = () => {
-        // SSE fallback
-      };
-    } catch {}
-  }
-
-  // 4. Storage event fallback
+  // 3. Storage event fallback for cross-tab sync
   const handleStorage = (e: StorageEvent) => {
     if (e.key === 'gym_live_sync_trigger') {
       try {
         const parsed = JSON.parse(e.newValue || '{}');
-        if (parsed.updatedAt > subscriberLastTimestamp) {
-          subscriberLastTimestamp = parsed.updatedAt;
-          const isRemote = parsed.deviceId !== myDeviceId;
+        const isRemote = parsed.deviceId !== myDeviceId;
+        if (isRemote || parsed.updatedAt > subscriberLastTimestamp) {
+          if (parsed.updatedAt > subscriberLastTimestamp) {
+            subscriberLastTimestamp = parsed.updatedAt;
+          }
           onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
         }
       } catch {}
@@ -449,9 +435,6 @@ export function subscribeLiveSync(
     unsubFirestore();
     if (syncChannel) {
       syncChannel.removeEventListener('message', handleBroadcast);
-    }
-    if (eventSource) {
-      eventSource.close();
     }
     if (typeof window !== 'undefined') {
       window.removeEventListener('storage', handleStorage);

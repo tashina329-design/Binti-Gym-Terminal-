@@ -755,7 +755,8 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
         plan: member.plan,
         endDate: member.endDate,
         status
-      }
+      },
+      store
     };
   }
 

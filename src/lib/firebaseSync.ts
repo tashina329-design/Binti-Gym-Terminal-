@@ -56,6 +56,14 @@ export function getStoredBusinessName(): string {
   }
 }
 
+export function getStoredBusinessPin(): string {
+  try {
+    return localStorage.getItem('current_business_pin') || '1234';
+  } catch {
+    return '1234';
+  }
+}
+
 export function normalizeStoreKey(businessName?: string): string {
   const name = businessName || getStoredBusinessName();
   const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -68,6 +76,142 @@ function getStoreDocRef(businessName?: string) {
     return doc(db, 'gym', 'store');
   }
   return doc(db, 'gym_stores', key);
+}
+
+export async function fetchStoresFromCloud(): Promise<string[]> {
+  try {
+    const regDoc = doc(db, 'gym', 'registry');
+    const snap = await getDoc(regDoc);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.stores)) {
+        return data.stores.filter(Boolean);
+      }
+    }
+  } catch {}
+  return ['Binti Gym'];
+}
+
+export async function authenticateCloudBusinessStore(
+  name: string,
+  pin: string,
+  mode: 'login' | 'register'
+): Promise<{ success: boolean; message?: string; store?: GymDataStore; businessName?: string; pin?: string }> {
+  const cleanName = name.trim();
+  const cleanPin = pin.trim();
+  const docRef = getStoreDocRef(cleanName);
+
+  try {
+    const snapshot = await getDoc(docRef);
+
+    if (mode === 'login') {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const storedPin = String(data.pin || data.store?.staffPin || '1234').trim();
+        if (storedPin !== cleanPin) {
+          return {
+            success: false,
+            message: `Incorrect 4-digit PIN code for "${cleanName}". Access denied.`,
+          };
+        }
+        if (data.store) {
+          try {
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
+            if (data.store.registeredStaff) {
+              localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+            }
+            if (data.store.staffPin) {
+              localStorage.setItem('gym_staff_pin', data.store.staffPin);
+            }
+          } catch {}
+        }
+        return {
+          success: true,
+          businessName: data.name || cleanName,
+          pin: cleanPin,
+          store: data.store as GymDataStore,
+        };
+      } else {
+        return {
+          success: false,
+          message: `Business "${cleanName}" not found. Please click "Register New Store" to create it.`,
+        };
+      }
+    } else {
+      if (snapshot.exists()) {
+        return {
+          success: false,
+          message: `Business "${cleanName}" is already registered. Please select it and enter its 4-digit PIN code to log in.`,
+        };
+      }
+
+      let storeToRegister: GymDataStore;
+      try {
+        const raw = localStorage.getItem('gym_data_store_v1');
+        storeToRegister = raw
+          ? JSON.parse(raw)
+          : {
+              members: [],
+              attendance: [],
+              expenses: [],
+              sales: [],
+              registeredStaff: [],
+              activeShift: null,
+              staffPin: cleanPin,
+            };
+      } catch {
+        storeToRegister = {
+          members: [],
+          attendance: [],
+          expenses: [],
+          sales: [],
+          registeredStaff: [],
+          activeShift: null,
+          staffPin: cleanPin,
+        };
+      }
+
+      storeToRegister.staffPin = cleanPin;
+
+      const payload = {
+        name: cleanName,
+        pin: cleanPin,
+        updatedAt: Date.now(),
+        deviceId: getDeviceId(),
+        store: storeToRegister,
+      };
+
+      await setDoc(docRef, payload, { merge: true });
+
+      try {
+        const regDoc = doc(db, 'gym', 'registry');
+        const regSnap = await getDoc(regDoc);
+        const existingStores: string[] =
+          regSnap.exists() && Array.isArray(regSnap.data()?.stores) ? regSnap.data().stores : ['Binti Gym'];
+        if (!existingStores.includes(cleanName)) {
+          existingStores.push(cleanName);
+          await setDoc(regDoc, { stores: existingStores }, { merge: true });
+        }
+      } catch {}
+
+      try {
+        localStorage.setItem('gym_data_store_v1', JSON.stringify(storeToRegister));
+      } catch {}
+
+      return {
+        success: true,
+        businessName: cleanName,
+        pin: cleanPin,
+        store: storeToRegister,
+      };
+    }
+  } catch (err: any) {
+    console.warn('Cloud store auth fallback:', err);
+    return {
+      success: false,
+      message: err.message || 'Could not verify business credentials on cloud database.',
+    };
+  }
 }
 
 export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
@@ -282,6 +426,7 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
   const timestamp = Date.now();
   const myDeviceId = getDeviceId();
   const activeBiz = businessName || getStoredBusinessName();
+  const activePin = getStoredBusinessPin();
 
   // Load latest store if not provided
   let storeToSync = storeData;
@@ -293,6 +438,8 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
   }
 
   const payload = {
+    name: activeBiz,
+    pin: activePin,
     updatedAt: timestamp,
     deviceId: myDeviceId,
     lastEvent: eventData ? { ...eventData, deviceId: myDeviceId } : null,
@@ -325,6 +472,18 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
   try {
     const storeDocRef = getStoreDocRef(activeBiz);
     await setDoc(storeDocRef, payload, { merge: true });
+
+    // Keep cloud registry doc updated
+    try {
+      const regDoc = doc(db, 'gym', 'registry');
+      const regSnap = await getDoc(regDoc);
+      const existingStores: string[] =
+        regSnap.exists() && Array.isArray(regSnap.data()?.stores) ? regSnap.data().stores : ['Binti Gym'];
+      if (!existingStores.includes(activeBiz)) {
+        existingStores.push(activeBiz);
+        await setDoc(regDoc, { stores: existingStores }, { merge: true });
+      }
+    } catch {}
   } catch (err) {
     console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);
     try {

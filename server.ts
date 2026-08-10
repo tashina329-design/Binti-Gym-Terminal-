@@ -119,21 +119,61 @@ interface GymDataStore {
   staffPin?: string;
 }
 
+const BRUNEI_TIMEZONE = 'Asia/Brunei';
+
+function getBruneiTodayIsoDate(dateObj?: Date): string {
+  const d = dateObj || new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BRUNEI_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(d);
+}
+
+function getBruneiFormattedTime(dateObj?: Date): string {
+  const d = dateObj || new Date();
+  return d.toLocaleTimeString('en-US', {
+    timeZone: BRUNEI_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
 function getTodayStr(d = new Date()): string {
-  if (!d || isNaN(d.getTime())) d = new Date();
+  return getBruneiTodayIsoDate(d);
+}
+
+function isSameDate(timestamp: any, targetDateStr: string): boolean {
+  if (!timestamp || !targetDateStr) return false;
+  const str = String(timestamp).trim();
+  if (str.startsWith(targetDateStr)) return true;
+
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return false;
+
+  const bruneiDate = getBruneiTodayIsoDate(d);
+  if (bruneiDate === targetDateStr) return true;
+
+  try {
+    const utcDate = d.toISOString().split('T')[0];
+    if (utcDate === targetDateStr) return true;
+  } catch (e) {}
+
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const localDate = `${year}-${month}-${day}`;
+  if (localDate === targetDateStr) return true;
+
+  return false;
 }
 
 function formatTime(d: Date): string {
-  if (!d || isNaN(d.getTime())) return '--:--';
-  try {
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-  } catch (e) {
-    return '--:--';
-  }
+  if (!d || isNaN(d.getTime())) return getBruneiFormattedTime();
+  return getBruneiFormattedTime(d);
 }
 
 function getMemberStatus(endDateStr: string, referenceDateStr?: string): 'Active' | 'Expiring Soon' | 'Expired' {
@@ -364,10 +404,8 @@ function getDashboardData(dateStr?: string) {
 
   // Sales
   for (const s of store.sales) {
-    const d = new Date(s.timestamp);
-    const dateOfSale = getTodayStr(d);
-
-    if (dateOfSale === targetDateStr) {
+    if (isSameDate(s.timestamp, targetDateStr)) {
+      const d = new Date(s.timestamp);
       const category = s.category || '';
       const customer = s.customer || '';
       const paymentRaw = s.paymentMethod || '';
@@ -410,10 +448,8 @@ function getDashboardData(dateStr?: string) {
 
   // Expenses
   for (const e of store.expenses) {
-    const d = new Date(e.timestamp);
-    const dateOfExp = getTodayStr(d);
-
-    if (dateOfExp === targetDateStr) {
+    if (isSameDate(e.timestamp, targetDateStr)) {
+      const d = new Date(e.timestamp);
       const category = e.category || '';
       const description = e.description || '';
       const paymentRaw = e.paymentMethod || '';
@@ -438,10 +474,8 @@ function getDashboardData(dateStr?: string) {
 
   // Attendance
   for (const a of store.attendance) {
-    const d = new Date(a.timestamp);
-    const dateOfAtt = getTodayStr(d);
-
-    if (dateOfAtt === targetDateStr) {
+    if (isSameDate(a.timestamp, targetDateStr)) {
+      const d = new Date(a.timestamp);
       checkinCount++;
       todayAttendance.push({
         timestamp: a.timestamp,

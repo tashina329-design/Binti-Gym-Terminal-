@@ -476,6 +476,54 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
   const dateParam = searchParams.get('date') || searchParams.get('viewDate') || undefined;
   const nowISO = new Date().toISOString();
 
+  if (cleanUrl.endsWith('/api/sync')) {
+    const { store: incomingStore } = body || {};
+    const currentStore = loadClientStore();
+    if (incomingStore && typeof incomingStore === 'object') {
+      const mergedMembers = Array.from(
+        new Map(
+          [...(currentStore.members || []), ...(incomingStore.members || [])].map((m) => [m.memberId, m])
+        ).values()
+      );
+      const mergedAttendance = Array.from(
+        new Map(
+          [...(currentStore.attendance || []), ...(incomingStore.attendance || [])].map((a) => [
+            `${a.timestamp}-${a.memberId || a.name}`,
+            a,
+          ])
+        ).values()
+      );
+      const mergedSales = Array.from(
+        new Map(
+          [...(currentStore.sales || []), ...(incomingStore.sales || [])].map((s) => [
+            s.id || `${s.timestamp}-${s.buyerName}`,
+            s,
+          ])
+        ).values()
+      );
+      const mergedExpenses = Array.from(
+        new Map(
+          [...(currentStore.expenses || []), ...(incomingStore.expenses || [])].map((e) => [
+            e.id || `${e.timestamp}-${e.description}`,
+            e,
+          ])
+        ).values()
+      );
+
+      const mergedStore: GymDataStore = {
+        ...currentStore,
+        ...incomingStore,
+        members: mergedMembers,
+        attendance: mergedAttendance,
+        sales: mergedSales,
+        expenses: mergedExpenses,
+      };
+      saveClientStore(mergedStore);
+      return { success: true, store: mergedStore };
+    }
+    return { success: true, store: currentStore };
+  }
+
   if (cleanUrl.endsWith('/api/stores')) {
     const registry = getClientBusinessRegistry();
     const list = Object.values(registry).map((b) => ({

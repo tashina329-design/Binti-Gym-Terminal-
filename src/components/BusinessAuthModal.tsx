@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Lock, KeyRound, ArrowRight, ShieldCheck, PlusCircle, LogIn, Store } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { authenticateCloudBusinessStore, fetchStoresFromCloud, broadcastLiveSync } from '../lib/firebaseSync';
 
 interface BusinessAuthModalProps {
   isOpen: boolean;
@@ -37,18 +38,27 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
 
   const loadExistingStores = async () => {
     try {
-      const res = await apiFetch('/api/stores');
-      if (res && res.stores && Array.isArray(res.stores)) {
-        const names = res.stores.map((s: any) => s.name);
-        setExistingStores(names);
-        if (names.length > 0 && !businessName) {
-          setSelectedStoreFromList(names[0]);
-          setBusinessName(names[0]);
+      let serverNames: string[] = [];
+      try {
+        const res = await apiFetch('/api/stores');
+        if (res && res.stores && Array.isArray(res.stores)) {
+          serverNames = res.stores.map((s: any) => s.name);
+        }
+      } catch {}
+
+      const cloudNames = await fetchStoresFromCloud();
+      const merged = Array.from(new Set([...serverNames, ...cloudNames])).filter(Boolean);
+
+      if (merged.length > 0) {
+        setExistingStores(merged);
+        if (!businessName) {
+          setSelectedStoreFromList(merged[0]);
+          setBusinessName(merged[0]);
           setMode('login');
         }
       }
     } catch {
-      // Ignore
+      // Fallback ignore
     }
   };
 
@@ -101,12 +111,55 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
       if (res && res.success) {
         localStorage.setItem('current_business_name', activeName);
         localStorage.setItem('current_business_pin', pin);
+        if (res.store) {
+          try {
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(res.store));
+          } catch {}
+        }
+        await broadcastLiveSync(undefined, res.store, activeName);
+        onAuthenticated(activeName, pin);
+        return;
+      } else if (res && res.message && res.message.includes('Incorrect 4-digit PIN')) {
+        setError(res.message);
+        return;
+      }
+
+      // Try direct cloud authentication across devices if API was not definitive or in fallback mode
+      const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
+      if (cloudRes.success) {
+        localStorage.setItem('current_business_name', activeName);
+        localStorage.setItem('current_business_pin', pin);
+        if (cloudRes.store) {
+          try {
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
+          } catch {}
+        }
+        await broadcastLiveSync(undefined, cloudRes.store, activeName);
         onAuthenticated(activeName, pin);
       } else {
-        setError(res?.message || res?.error || 'Authentication failed.');
+        setError(cloudRes.message || 'Authentication failed. Check business name and 4-digit PIN.');
       }
     } catch (err: any) {
-      setError(err?.message || 'Failed to connect. Check 4-digit PIN and try again.');
+      // Fallback to cloud authentication
+      try {
+        const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
+        if (cloudRes.success) {
+          localStorage.setItem('current_business_name', activeName);
+          localStorage.setItem('current_business_pin', pin);
+          if (cloudRes.store) {
+            try {
+              localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
+            } catch {}
+          }
+          await broadcastLiveSync(undefined, cloudRes.store, activeName);
+          onAuthenticated(activeName, pin);
+          return;
+        } else {
+          setError(cloudRes.message || 'Authentication failed. Check business name and 4-digit PIN.');
+        }
+      } catch {
+        setError(err?.message || 'Failed to connect. Check 4-digit PIN and try again.');
+      }
     } finally {
       setLoading(false);
     }

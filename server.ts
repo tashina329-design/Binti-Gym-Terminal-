@@ -307,60 +307,134 @@ function broadcastDataUpdate(payload?: any) {
   }
 }
 
-let memoryStore: GymDataStore | null = null;
+interface BusinessMeta {
+  name: string;
+  pin: string;
+  registeredAt: string;
+}
 
-function loadData(): GymDataStore {
-  if (memoryStore) {
-    return memoryStore;
+interface MultiBusinessContainer {
+  businesses: Record<string, BusinessMeta>;
+  stores: Record<string, GymDataStore>;
+}
+
+function normalizeBusinessKey(name?: string): string {
+  const clean = (name || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  return clean || 'binti_gym';
+}
+
+function getBusinessNameFromReq(req: express.Request): string {
+  const name =
+    (req.headers['x-business-name'] as string) ||
+    (req.query.businessName as string) ||
+    (req.body && req.body.businessName) ||
+    'Binti Gym';
+  return name.trim() || 'Binti Gym';
+}
+
+let multiStoreContainer: MultiBusinessContainer | null = null;
+
+function loadRootContainer(): MultiBusinessContainer {
+  if (multiStoreContainer) {
+    return multiStoreContainer;
   }
   const filePath = getDataFilePath();
   try {
     if (fs.existsSync(filePath)) {
       const raw = fs.readFileSync(filePath, 'utf-8');
-      const store: GymDataStore = JSON.parse(raw);
-      if (!store.registeredStaff || store.registeredStaff.length === 0) {
-        store.registeredStaff = [
-          {
-            id: 'STF-001',
-            name: 'Alex (Duty Staff)',
-            phone: '8123456',
-            pin: '123456',
-            registeredAt: new Date().toISOString(),
+      const parsed = JSON.parse(raw);
+      if (parsed.businesses && parsed.stores) {
+        multiStoreContainer = parsed;
+        return parsed;
+      } else if (parsed.members) {
+        const key = 'binti_gym';
+        multiStoreContainer = {
+          businesses: {
+            [key]: {
+              name: 'Binti Gym',
+              pin: parsed.staffPin || '1234',
+              registeredAt: new Date().toISOString(),
+            },
           },
-        ];
+          stores: {
+            [key]: parsed,
+          },
+        };
+        saveRootContainer(multiStoreContainer);
+        return multiStoreContainer;
       }
-      if (!store.staffPin) {
-        store.staffPin = '123456';
-      }
-      memoryStore = store;
-      return store;
     }
   } catch (err) {
-    console.error('Failed to load gym data file, initializing new standard database:', err);
+    console.error('Failed to load gym data file:', err);
   }
+
+  const key = 'binti_gym';
   const defaultData = getDefaultData();
-  memoryStore = defaultData;
-  saveData(defaultData);
-  return defaultData;
+  multiStoreContainer = {
+    businesses: {
+      [key]: {
+        name: 'Binti Gym',
+        pin: '1234',
+        registeredAt: new Date().toISOString(),
+      },
+    },
+    stores: {
+      [key]: defaultData,
+    },
+  };
+  saveRootContainer(multiStoreContainer);
+  return multiStoreContainer;
 }
 
-function saveData(data: GymDataStore) {
-  memoryStore = data;
+function saveRootContainer(container: MultiBusinessContainer) {
+  multiStoreContainer = container;
   const filePath = getDataFilePath();
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(container, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to save gym data:', err);
   }
   try {
     broadcastDataUpdate();
   } catch (err) {
-    // Ignore SSE errors in serverless
+    // Ignore SSE errors
   }
 }
 
-function getDashboardData(dateStr?: string) {
-  const store = loadData();
+function loadData(businessName?: string): GymDataStore {
+  const container = loadRootContainer();
+  const key = normalizeBusinessKey(businessName);
+  if (!container.stores[key]) {
+    container.stores[key] = {
+      members: [],
+      attendance: [],
+      sales: [],
+      expenses: [],
+      registeredStaff: [],
+      activeShift: null,
+      staffPin: container.businesses[key]?.pin || '1234',
+    };
+    if (!container.businesses[key]) {
+      container.businesses[key] = {
+        name: businessName || 'Binti Gym',
+        pin: '1234',
+        registeredAt: new Date().toISOString(),
+      };
+    }
+    saveRootContainer(container);
+  }
+  return container.stores[key];
+}
+
+function saveData(data: GymDataStore, businessName?: string) {
+  const container = loadRootContainer();
+  const key = normalizeBusinessKey(businessName);
+  container.stores[key] = data;
+  saveRootContainer(container);
+}
+
+function getDashboardData(dateStr?: string, businessName?: string) {
+  const store = loadData(businessName);
   const targetDateStr = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : getTodayStr();
 
   let totalRevenue = 0;
@@ -537,21 +611,126 @@ apiRouter.get('/events', (req, res) => {
   });
 });
 
-// GET /api/staff - Fetch registered staff and active shift across all devices
-apiRouter.get('/staff', (req, res, next) => {
+// GET /api/stores - List all registered business names
+apiRouter.get('/stores', (req, res, next) => {
   try {
-    const store = loadData();
+    const container = loadRootContainer();
+    const list = Object.values(container.businesses).map((b) => ({
+      name: b.name,
+      registeredAt: b.registeredAt,
+    }));
+    res.json({ success: true, stores: list });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/stores/register - Register new business & set 4-digit PIN
+apiRouter.post('/stores/register', (req, res, next) => {
+  try {
+    const { name, pin } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Business Name is required.' });
+    }
+    const cleanName = String(name).trim();
+    const cleanPin = String(pin || '').trim();
+    if (!/^\d{4}$/.test(cleanPin)) {
+      return res.status(400).json({ success: false, message: 'PIN code must be exactly 4 numeric digits.' });
+    }
+
+    const container = loadRootContainer();
+    const key = normalizeBusinessKey(cleanName);
+
+    if (container.businesses[key]) {
+      return res.status(400).json({
+        success: false,
+        message: `Business "${cleanName}" is already registered. Please select it and enter your 4-digit PIN code.`,
+      });
+    }
+
+    // Initialize business metadata and empty store
+    container.businesses[key] = {
+      name: cleanName,
+      pin: cleanPin,
+      registeredAt: new Date().toISOString(),
+    };
+    container.stores[key] = {
+      members: [],
+      attendance: [],
+      sales: [],
+      expenses: [],
+      registeredStaff: [],
+      activeShift: null,
+      staffPin: cleanPin,
+    };
+    saveRootContainer(container);
+
     res.json({
-      registeredStaff: store.registeredStaff || [],
-      activeShift: store.activeShift || null,
-      staffPin: store.staffPin || '123456',
+      success: true,
+      businessName: cleanName,
+      pin: cleanPin,
+      store: container.stores[key],
     });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /api/staff/register - Register new staff or 6-digit PIN across all devices
+// POST /api/stores/login - Log into existing business with 4-digit PIN
+apiRouter.post('/stores/login', (req, res, next) => {
+  try {
+    const { name, pin } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Business Name is required.' });
+    }
+    const cleanName = String(name).trim();
+    const cleanPin = String(pin || '').trim();
+    const container = loadRootContainer();
+    const key = normalizeBusinessKey(cleanName);
+
+    const biz = container.businesses[key];
+    if (!biz) {
+      return res.status(404).json({
+        success: false,
+        message: `Business "${cleanName}" not found. Please click "Register New Business" to create it.`,
+      });
+    }
+
+    if (biz.pin !== cleanPin) {
+      return res.status(401).json({
+        success: false,
+        message: `Incorrect 4-digit PIN code for "${biz.name}". Access denied.`,
+      });
+    }
+
+    const store = container.stores[key] || loadData(cleanName);
+    res.json({
+      success: true,
+      businessName: biz.name,
+      pin: biz.pin,
+      store,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/staff - Fetch registered staff and active shift across all devices
+apiRouter.get('/staff', (req, res, next) => {
+  try {
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
+    res.json({
+      registeredStaff: store.registeredStaff || [],
+      activeShift: store.activeShift || null,
+      staffPin: store.staffPin || '1234',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/staff/register - Register new staff or PIN across all devices
 apiRouter.post('/staff/register', (req, res, next) => {
   try {
     const { newStaff } = req.body || {};
@@ -559,13 +738,14 @@ apiRouter.post('/staff/register', (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid staff payload' });
     }
 
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     if (!store.registeredStaff) store.registeredStaff = [];
 
     store.registeredStaff.push(newStaff);
     store.staffPin = newStaff.pin;
 
-    saveData(store);
+    saveData(store, bizName);
     res.json({ success: true, registeredStaff: store.registeredStaff, staffPin: store.staffPin });
   } catch (err) {
     next(err);
@@ -576,9 +756,10 @@ apiRouter.post('/staff/register', (req, res, next) => {
 apiRouter.post('/staff/shift/start', (req, res, next) => {
   try {
     const { shift } = req.body || {};
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     store.activeShift = shift;
-    saveData(store);
+    saveData(store, bizName);
     res.json({ success: true, activeShift: shift });
   } catch (err) {
     next(err);
@@ -588,9 +769,10 @@ apiRouter.post('/staff/shift/start', (req, res, next) => {
 // POST /api/staff/shift/end - End shift
 apiRouter.post('/staff/shift/end', (req, res, next) => {
   try {
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     store.activeShift = null;
-    saveData(store);
+    saveData(store, bizName);
     res.json({ success: true, activeShift: null });
   } catch (err) {
     next(err);
@@ -601,7 +783,8 @@ apiRouter.post('/staff/shift/end', (req, res, next) => {
 apiRouter.get('/dashboard', (req, res, next) => {
   try {
     const dateStr = req.query.date as string | undefined;
-    const data = getDashboardData(dateStr);
+    const bizName = getBusinessNameFromReq(req);
+    const data = getDashboardData(dateStr, bizName);
     res.json(data);
   } catch (err) {
     next(err);
@@ -612,7 +795,8 @@ apiRouter.get('/dashboard', (req, res, next) => {
 apiRouter.post('/checkin/phone', (req, res, next) => {
   try {
     const { phone } = req.body || {};
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const cleanPhone = String(phone || '').replace(/\D/g, '');
 
     if (!cleanPhone) {
@@ -662,7 +846,7 @@ apiRouter.post('/checkin/phone', (req, res, next) => {
       status
     });
 
-    saveData(store);
+    saveData(store, bizName);
     return res.json({ success: true, message: `Welcome back, ${member.name}!` });
   } catch (err) {
     next(err);
@@ -673,7 +857,8 @@ apiRouter.post('/checkin/phone', (req, res, next) => {
 apiRouter.post('/checkin/id', (req, res, next) => {
   try {
     const { memberId } = req.body || {};
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
 
     const member = store.members.find(m => String(m.memberId) === String(memberId));
     if (!member) {
@@ -694,7 +879,7 @@ apiRouter.post('/checkin/id', (req, res, next) => {
       status
     });
 
-    saveData(store);
+    saveData(store, bizName);
     return res.json({ success: true, message: `Welcome back, ${member.name}!` });
   } catch (err) {
     next(err);
@@ -706,7 +891,8 @@ apiRouter.post('/walkin', (req, res, next) => {
   try {
     const { name, phone, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     store.sales.unshift({
@@ -727,8 +913,8 @@ apiRouter.post('/walkin', (req, res, next) => {
       status: 'Active'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -739,7 +925,8 @@ apiRouter.post('/pos', (req, res, next) => {
   try {
     const { itemName, qty, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     store.sales.unshift({
@@ -751,8 +938,8 @@ apiRouter.post('/pos', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -763,7 +950,8 @@ apiRouter.post('/class', (req, res, next) => {
   try {
     const { className, clientName, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     store.sales.unshift({
@@ -784,8 +972,8 @@ apiRouter.post('/class', (req, res, next) => {
       status: 'Active'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -796,7 +984,8 @@ apiRouter.post('/pt/in', (req, res, next) => {
   try {
     const { trainerName, clientName, sessions, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     const parts = [];
@@ -814,8 +1003,8 @@ apiRouter.post('/pt/in', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -826,7 +1015,8 @@ apiRouter.post('/pt/out', (req, res, next) => {
   try {
     const { trainerName, description, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     store.expenses.unshift({
@@ -838,8 +1028,8 @@ apiRouter.post('/pt/out', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -850,7 +1040,8 @@ apiRouter.post('/expense', (req, res, next) => {
   try {
     const { category, description, amount, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     store.expenses.unshift({
@@ -862,8 +1053,8 @@ apiRouter.post('/expense', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -874,7 +1065,8 @@ apiRouter.post('/members/register', (req, res, next) => {
   try {
     const { name, phone, planType, price, startDate, endDate, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
     const memberId = 'MEM-' + Math.floor(100000 + Math.random() * 900000);
 
@@ -899,8 +1091,8 @@ apiRouter.post('/members/register', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -911,7 +1103,8 @@ apiRouter.post('/members/renew', (req, res, next) => {
   try {
     const { memberId, planType, price, paymentMethod, staff, viewDate, date } = req.body || {};
     const targetDate = (req.query.date as string) || viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
     const nowISO = new Date().toISOString();
 
     const member = store.members.find(m => String(m.memberId) === String(memberId));
@@ -939,8 +1132,8 @@ apiRouter.post('/members/renew', (req, res, next) => {
       staff: staff || 'Duty Staff'
     });
 
-    saveData(store);
-    res.json(getDashboardData(targetDate));
+    saveData(store, bizName);
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -951,7 +1144,8 @@ apiRouter.post('/sales/delete', (req, res, next) => {
   try {
     const { timestamp, customer, amount, date, viewDate } = req.body || {};
     const targetDate = viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
 
     const idx = store.sales.findIndex((s) => {
       if (timestamp && String(s.timestamp) === String(timestamp)) return true;
@@ -961,10 +1155,10 @@ apiRouter.post('/sales/delete', (req, res, next) => {
 
     if (idx !== -1) {
       store.sales.splice(idx, 1);
-      saveData(store);
+      saveData(store, bizName);
     }
 
-    res.json(getDashboardData(targetDate));
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -975,7 +1169,8 @@ apiRouter.post('/attendance/delete', (req, res, next) => {
   try {
     const { timestamp, name, phone, date, viewDate } = req.body || {};
     const targetDate = viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
 
     const idx = store.attendance.findIndex((a) => {
       if (timestamp && String(a.timestamp) === String(timestamp)) return true;
@@ -985,10 +1180,10 @@ apiRouter.post('/attendance/delete', (req, res, next) => {
 
     if (idx !== -1) {
       store.attendance.splice(idx, 1);
-      saveData(store);
+      saveData(store, bizName);
     }
 
-    res.json(getDashboardData(targetDate));
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -999,7 +1194,8 @@ apiRouter.post('/expense/delete', (req, res, next) => {
   try {
     const { timestamp, description, amount, date, viewDate } = req.body || {};
     const targetDate = viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
 
     const idx = store.expenses.findIndex((e) => {
       if (timestamp && String(e.timestamp) === String(timestamp)) return true;
@@ -1009,10 +1205,10 @@ apiRouter.post('/expense/delete', (req, res, next) => {
 
     if (idx !== -1) {
       store.expenses.splice(idx, 1);
-      saveData(store);
+      saveData(store, bizName);
     }
 
-    res.json(getDashboardData(targetDate));
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -1023,15 +1219,16 @@ apiRouter.post('/members/delete', (req, res, next) => {
   try {
     const { memberId, date, viewDate } = req.body || {};
     const targetDate = viewDate || date;
-    const store = loadData();
+    const bizName = getBusinessNameFromReq(req);
+    const store = loadData(bizName);
 
     const idx = store.members.findIndex((m) => String(m.memberId) === String(memberId));
     if (idx !== -1) {
       store.members.splice(idx, 1);
-      saveData(store);
+      saveData(store, bizName);
     }
 
-    res.json(getDashboardData(targetDate));
+    res.json(getDashboardData(targetDate, bizName));
   } catch (err) {
     next(err);
   }
@@ -1040,9 +1237,10 @@ apiRouter.post('/members/delete', (req, res, next) => {
 // POST /api/reset
 apiRouter.post('/reset', (req, res, next) => {
   try {
+    const bizName = getBusinessNameFromReq(req);
     const defaultData = getDefaultData();
-    saveData(defaultData);
-    res.json(getDashboardData());
+    saveData(defaultData, bizName);
+    res.json(getDashboardData(undefined, bizName));
   } catch (err) {
     next(err);
   }

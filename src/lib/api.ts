@@ -256,8 +256,8 @@ export function saveClientStore(store: GymDataStore, eventPayload?: SyncEventPay
   }
 }
 
-export function getClientDashboardData(dateStr?: string): DashboardData {
-  const store = loadClientStore();
+export function getClientDashboardData(dateStr?: string, customStore?: GymDataStore): DashboardData {
+  const store = customStore || loadClientStore();
   const targetDateStr = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : getTodayStr();
 
   let totalRevenue = 0;

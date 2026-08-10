@@ -229,8 +229,8 @@ export async function authenticateCloudBusinessStore(
 export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
   try {
     const storeDocRef = getStoreDocRef(businessName);
-    const snapshot = await getDoc(storeDocRef);
-    if (snapshot.exists()) {
+    const snapshot = await withTimeout(getDoc(storeDocRef), 2500, null as any);
+    if (snapshot && snapshot.exists && snapshot.exists()) {
       const data = snapshot.data();
       if (data.store) {
         try {
@@ -480,26 +480,30 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     } catch {}
   }
 
-  // Broadcast to Firestore for real-time multi-device cloud synchronization
-  try {
-    const storeDocRef = getStoreDocRef(activeBiz);
-    await setDoc(storeDocRef, payload, { merge: true });
+  // Broadcast to Firestore asynchronously for real-time multi-device cloud synchronization
+  (async () => {
+    try {
+      const storeDocRef = getStoreDocRef(activeBiz);
+      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 3000, null);
 
-    // Keep cloud registry doc updated
-    try {
-      const regDoc = doc(db, 'gym', 'registry');
-      const regSnap = await getDoc(regDoc);
-      const existingStores: string[] =
-        regSnap.exists() && Array.isArray(regSnap.data()?.stores) ? regSnap.data().stores : ['Binti Gym'];
-      if (!existingStores.includes(activeBiz)) {
-        existingStores.push(activeBiz);
-        await setDoc(regDoc, { stores: existingStores }, { merge: true });
-      }
-    } catch {}
-  } catch (err) {
-    console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);
-    try {
-      localStorage.setItem('gym_pending_offline_sync', 'true');
-    } catch {}
-  }
+      // Keep cloud registry doc updated
+      try {
+        const regDoc = doc(db, 'gym', 'registry');
+        const regSnap = await withTimeout(getDoc(regDoc), 2000, null as any);
+        const existingStores: string[] =
+          regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
+            ? regSnap.data().stores
+            : ['Binti Gym'];
+        if (!existingStores.includes(activeBiz)) {
+          existingStores.push(activeBiz);
+          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 2000, null);
+        }
+      } catch {}
+    } catch (err) {
+      console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);
+      try {
+        localStorage.setItem('gym_pending_offline_sync', 'true');
+      } catch {}
+    }
+  })();
 }

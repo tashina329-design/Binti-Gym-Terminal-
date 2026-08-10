@@ -95,8 +95,16 @@ export default function App() {
     localStorage.setItem('current_business_pin', pin);
     setShowBusinessAuthModal(false);
 
-    // Reload store data for this business
-    fetchCloudStore(bizName).then(() => {
+    // Reload store data for this business from cloud Firestore
+    fetchCloudStore(bizName).then((cloudStore) => {
+      if (cloudStore) {
+        if (cloudStore.availableStores) {
+          setAvailableStores(cloudStore.availableStores);
+        }
+        if (cloudStore.activeShift !== undefined) {
+          setActiveShift(cloudStore.activeShift);
+        }
+      }
       loadDashboard(selectedDate);
     });
   };

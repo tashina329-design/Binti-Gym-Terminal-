@@ -19,7 +19,7 @@ import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
 import { BusinessAuthModal } from './components/BusinessAuthModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
-import { apiFetch, loadClientStore, saveClientStore, getBruneiTodayIsoDate } from './lib/api';
+import { apiFetch, loadClientStore, saveClientStore, getClientDashboardData, getBruneiTodayIsoDate } from './lib/api';
 import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, PushNotification } from './types';
@@ -98,14 +98,17 @@ export default function App() {
     // Reload store data for this business from cloud Firestore
     fetchCloudStore(bizName).then((cloudStore) => {
       if (cloudStore) {
+        saveClientStore(cloudStore);
         if (cloudStore.availableStores) {
           setAvailableStores(cloudStore.availableStores);
         }
         if (cloudStore.activeShift !== undefined) {
           setActiveShift(cloudStore.activeShift);
         }
+        loadDashboard(selectedDate, cloudStore);
+      } else {
+        loadDashboard(selectedDate);
       }
-      loadDashboard(selectedDate);
     });
   };
 
@@ -213,12 +216,19 @@ export default function App() {
   }, []);
 
   // Fetch Dashboard Data
-  const loadDashboard = useCallback(async (dateToFetch?: string) => {
+  const loadDashboard = useCallback(async (dateToFetch?: string, overrideStore?: GymDataStore) => {
     setIsRefreshing(true);
     const dateQuery = dateToFetch || selectedDate;
     try {
+      if (overrideStore) {
+        saveClientStore(overrideStore);
+        const instantData = getClientDashboardData(dateQuery, overrideStore);
+        setDashboardData(instantData);
+      }
       const data: DashboardData = await apiFetch(`/api/dashboard?date=${dateQuery}`);
-      setDashboardData(data);
+      if (data) {
+        setDashboardData(data);
+      }
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {
@@ -230,13 +240,14 @@ export default function App() {
   useEffect(() => {
     fetchCloudStore(currentBusinessName).then((cloudStore) => {
       if (cloudStore) {
+        saveClientStore(cloudStore);
         if (cloudStore.availableStores) {
           setAvailableStores(cloudStore.availableStores);
         }
         if (cloudStore.activeShift !== undefined) {
           setActiveShift(cloudStore.activeShift);
         }
-        loadDashboard(selectedDate);
+        loadDashboard(selectedDate, cloudStore);
       }
     });
   }, [selectedDate, loadDashboard, currentBusinessName]);
@@ -251,6 +262,7 @@ export default function App() {
       (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => {
         // Update local React state if remote store is passed
         if (remoteStore) {
+          saveClientStore(remoteStore);
           if (remoteStore.availableStores) {
             setAvailableStores(remoteStore.availableStores);
           }
@@ -259,8 +271,8 @@ export default function App() {
           }
         }
 
-        // Reload dashboard state
-        loadDashboard(selectedDate);
+        // Reload dashboard state with instant local computation
+        loadDashboard(selectedDate, remoteStore);
 
         // If update came from another device/tab, play chime & display notification banner
         if (isRemote && eventData) {

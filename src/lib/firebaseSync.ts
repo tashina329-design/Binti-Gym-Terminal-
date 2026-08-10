@@ -48,9 +48,31 @@ const syncChannel =
 
 let lastHandledTimestamp = 0;
 
-export async function fetchCloudStore(): Promise<GymDataStore | null> {
+export function getStoredBusinessName(): string {
   try {
-    const storeDocRef = doc(db, 'gym', 'store');
+    return localStorage.getItem('current_business_name') || 'Binti Gym';
+  } catch {
+    return 'Binti Gym';
+  }
+}
+
+export function normalizeStoreKey(businessName?: string): string {
+  const name = businessName || getStoredBusinessName();
+  const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  return clean || 'binti_gym';
+}
+
+function getStoreDocRef(businessName?: string) {
+  const key = normalizeStoreKey(businessName);
+  if (key === 'binti_gym') {
+    return doc(db, 'gym', 'store');
+  }
+  return doc(db, 'gym_stores', key);
+}
+
+export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
+  try {
+    const storeDocRef = getStoreDocRef(businessName);
     const snapshot = await getDoc(storeDocRef);
     if (snapshot.exists()) {
       const data = snapshot.data();
@@ -87,10 +109,12 @@ export async function fetchCloudStore(): Promise<GymDataStore | null> {
 
 export function subscribeLiveSync(
   onUpdate: (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => void,
-  onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void
+  onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void,
+  businessName?: string
 ) {
   let unsubFirestore = () => {};
   const myDeviceId = getDeviceId();
+  const activeBiz = businessName || getStoredBusinessName();
 
   const updateNetworkStatus = () => {
     if (typeof window !== 'undefined' && !window.navigator.onLine) {
@@ -112,7 +136,7 @@ export function subscribeLiveSync(
           type: 'reset',
           title: '📶 Back Online',
           message: 'Offline changes successfully synchronized with cloud database.',
-        });
+        }, undefined, activeBiz);
       }
     } catch {}
   };
@@ -128,7 +152,7 @@ export function subscribeLiveSync(
 
   // 1. Listen to Firestore real-time doc updates across all devices
   try {
-    const storeDocRef = doc(db, 'gym', 'store');
+    const storeDocRef = getStoreDocRef(activeBiz);
     unsubFirestore = onSnapshot(
       storeDocRef,
       (snapshot) => {
@@ -253,9 +277,10 @@ export function subscribeLiveSync(
   };
 }
 
-export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?: GymDataStore) {
+export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?: GymDataStore, businessName?: string) {
   const timestamp = Date.now();
   const myDeviceId = getDeviceId();
+  const activeBiz = businessName || getStoredBusinessName();
 
   // Load latest store if not provided
   let storeToSync = storeData;
@@ -297,7 +322,7 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
 
   // Broadcast to Firestore for real-time multi-device cloud synchronization
   try {
-    const storeDocRef = doc(db, 'gym', 'store');
+    const storeDocRef = getStoreDocRef(activeBiz);
     await setDoc(storeDocRef, payload, { merge: true });
   } catch (err) {
     console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);

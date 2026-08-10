@@ -226,9 +226,26 @@ export async function authenticateCloudBusinessStore(
   }
 }
 
+export function syncStoreToBackend(store: GymDataStore, businessName?: string) {
+  try {
+    const biz = businessName || getStoredBusinessName();
+    const pin = getStoredBusinessPin();
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Business-Name': biz,
+        'X-Business-Pin': pin,
+      },
+      body: JSON.stringify({ store }),
+    }).catch(() => {});
+  } catch {}
+}
+
 export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
   try {
-    const storeDocRef = getStoreDocRef(businessName);
+    const activeBiz = businessName || getStoredBusinessName();
+    const storeDocRef = getStoreDocRef(activeBiz);
     const snapshot = await withTimeout(getDoc(storeDocRef), 2500, null as any);
     if (snapshot && snapshot.exists && snapshot.exists()) {
       const data = snapshot.data();
@@ -254,6 +271,8 @@ export async function fetchCloudStore(businessName?: string): Promise<GymDataSto
         } catch (e) {
           console.warn('Failed to sync cloud store to localStorage:', e);
         }
+
+        syncStoreToBackend(data.store, activeBiz);
         return data.store as GymDataStore;
       }
     }
@@ -345,6 +364,7 @@ export function subscribeLiveSync(
               } catch (e) {
                 console.warn('Error updating local cache from remote cloud store:', e);
               }
+              syncStoreToBackend(data.store, activeBiz);
             }
 
             onUpdate(data.lastEvent || undefined, isRemote, data.store || undefined);

@@ -70,9 +70,6 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   const handleSelectTab = (tabId: TabId) => {
     onTabChange(tabId);
     setShowMobileMenu(false);
-    if (!activeShift && onOpenShiftModal) {
-      onOpenShiftModal();
-    }
   };
 
   const activeTabItem = tabs.find((t) => t.id === activeTab) || tabs[0];

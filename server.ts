@@ -583,12 +583,41 @@ function getDashboardData(dateStr?: string, businessName?: string) {
     baiduriIn,
     bibdIn,
     ptDetails,
-    viewDate: targetDateStr
+    viewDate: targetDateStr,
+    store
   };
 }
 
 // API ROUTE HANDLERS
 const apiRouter = express.Router();
+
+// Middleware to enforce 4-digit PIN verification per dedicated business store
+apiRouter.use((req, res, next) => {
+  if (
+    req.path === '/events' ||
+    req.path === '/stores' ||
+    req.path === '/stores/register' ||
+    req.path === '/stores/login'
+  ) {
+    return next();
+  }
+
+  const bizName = getBusinessNameFromReq(req);
+  const key = normalizeBusinessKey(bizName);
+  const container = loadRootContainer();
+  const biz = container.businesses[key];
+
+  const reqPin = (req.headers['x-business-pin'] as string) || (req.body && req.body.businessPin) || '';
+
+  if (biz && biz.pin && reqPin.trim() !== biz.pin) {
+    return res.status(401).json({
+      success: false,
+      message: `Access denied. Invalid 4-digit PIN for store "${biz.name}".`,
+    });
+  }
+
+  next();
+});
 
 // GET /api/events - Real-time Server-Sent Events for live sync without delay
 apiRouter.get('/events', (req, res) => {

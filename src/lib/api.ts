@@ -422,6 +422,43 @@ export function getStoredBusinessPin(): string {
   }
 }
 
+interface ClientStoreBusinessMeta {
+  name: string;
+  pin: string;
+  registeredAt: string;
+}
+
+function getClientBusinessRegistry(): Record<string, ClientStoreBusinessMeta> {
+  try {
+    const raw = localStorage.getItem('gym_registered_businesses');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch {}
+
+  const defaultKey = 'binti_gym';
+  const defaultReg: Record<string, ClientStoreBusinessMeta> = {
+    [defaultKey]: {
+      name: 'Binti Gym',
+      pin: '1234',
+      registeredAt: new Date().toISOString(),
+    },
+  };
+  try {
+    localStorage.setItem('gym_registered_businesses', JSON.stringify(defaultReg));
+  } catch {}
+  return defaultReg;
+}
+
+function saveClientBusinessRegistry(registry: Record<string, ClientStoreBusinessMeta>) {
+  try {
+    localStorage.setItem('gym_registered_businesses', JSON.stringify(registry));
+  } catch {}
+}
+
 export function handleClientFallbackRequest(url: string, options?: RequestInit): any {
   const store = loadClientStore();
   let body: any = {};
@@ -436,28 +473,96 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
   const cleanUrl = url.split('?')[0];
   const searchParams = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '');
   const dateParam = searchParams.get('date') || searchParams.get('viewDate') || undefined;
-
   const nowISO = new Date().toISOString();
 
   if (cleanUrl.endsWith('/api/stores')) {
+    const registry = getClientBusinessRegistry();
+    const list = Object.values(registry).map((b) => ({
+      name: b.name,
+      registeredAt: b.registeredAt,
+    }));
     return {
       success: true,
-      stores: [{ name: getStoredBusinessName(), registeredAt: nowISO }],
+      stores: list,
     };
   }
 
-  if (cleanUrl.endsWith('/api/stores/register') || cleanUrl.endsWith('/api/stores/login')) {
+  if (cleanUrl.endsWith('/api/stores/register')) {
     const { name, pin } = body;
-    const bizName = (name || getStoredBusinessName()).trim();
-    const bizPin = (pin || '1234').trim();
+    if (!name || !String(name).trim()) {
+      return { success: false, message: 'Business Name is required.' };
+    }
+    const cleanName = String(name).trim();
+    const cleanPin = String(pin || '').trim();
+    if (!/^\d{4}$/.test(cleanPin)) {
+      return { success: false, message: 'PIN code must be exactly 4 numeric digits.' };
+    }
+
+    const registry = getClientBusinessRegistry();
+    const key = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
+
+    if (registry[key]) {
+      return {
+        success: false,
+        message: `Business "${cleanName}" is already registered. Please select it and enter its 4-digit PIN code to log in.`,
+      };
+    }
+
+    registry[key] = {
+      name: cleanName,
+      pin: cleanPin,
+      registeredAt: new Date().toISOString(),
+    };
+    saveClientBusinessRegistry(registry);
+
     try {
-      localStorage.setItem('current_business_name', bizName);
-      localStorage.setItem('current_business_pin', bizPin);
+      localStorage.setItem('current_business_name', cleanName);
+      localStorage.setItem('current_business_pin', cleanPin);
     } catch {}
+
     return {
       success: true,
-      businessName: bizName,
-      pin: bizPin,
+      businessName: cleanName,
+      pin: cleanPin,
+      store,
+    };
+  }
+
+  if (cleanUrl.endsWith('/api/stores/login')) {
+    const { name, pin } = body;
+    if (!name || !String(name).trim()) {
+      return { success: false, message: 'Business Name is required.' };
+    }
+    const cleanName = String(name).trim();
+    const cleanPin = String(pin || '').trim();
+
+    const registry = getClientBusinessRegistry();
+    const key = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
+
+    const biz = registry[key];
+    if (!biz) {
+      return {
+        success: false,
+        message: `Business "${cleanName}" not found. Please click "Register New Store" to create it.`,
+      };
+    }
+
+    if (biz.pin !== cleanPin) {
+      return {
+        success: false,
+        message: `Incorrect 4-digit PIN code for "${biz.name}". Access denied.`,
+      };
+    }
+
+    try {
+      localStorage.setItem('current_business_name', biz.name);
+      localStorage.setItem('current_business_pin', biz.pin);
+    } catch {}
+
+    return {
+      success: true,
+      businessName: biz.name,
+      pin: biz.pin,
       store,
     };
   }
@@ -890,25 +995,14 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
       if (isJson) {
         try {
           const errorData = await res.json();
-          if (errorData && (errorData.message || errorData.error)) {
-            const errorMessage = errorData.message || errorData.error;
-            if (
-              errorMessage.includes('PIN') ||
-              errorMessage.includes('Expired') ||
-              errorMessage.includes('Denied') ||
-              errorMessage.includes('incorrect')
-            ) {
-              throw new Error(errorMessage);
+          if (errorData) {
+            if (errorData.message || errorData.error) {
+              throw new Error(errorData.message || errorData.error);
             }
+            return errorData as T;
           }
         } catch (e: any) {
-          if (
-            e.message &&
-            (e.message.includes('PIN') ||
-              e.message.includes('Expired') ||
-              e.message.includes('Denied') ||
-              e.message.includes('incorrect'))
-          ) {
+          if (e.message && e.message !== 'Unexpected end of JSON input') {
             throw e;
           }
         }
@@ -921,13 +1015,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
 
     return await res.json();
   } catch (err: any) {
-    if (
-      err.message &&
-      (err.message.includes('PIN') ||
-        err.message.includes('Expired') ||
-        err.message.includes('Denied') ||
-        err.message.includes('incorrect'))
-    ) {
+    if (err && err.message) {
       throw err;
     }
     isClientOnlyMode = true;

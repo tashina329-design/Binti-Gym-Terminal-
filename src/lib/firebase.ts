@@ -2,7 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache, Firestore } from 'firebase/firestore';
 import configFile from '../../firebase-applet-config.json';
 
-export const firebaseConfig = configFile || {
+const hardcodedConfig = {
   projectId: "bubbly-origin-nv7sv",
   appId: "1:457746749974:web:0136c1f2067898b4897337",
   apiKey: "AIzaSyC497CCzVzCln1x4Qy0GeldWd3v-VergfI",
@@ -13,6 +13,8 @@ export const firebaseConfig = configFile || {
   oAuthClientId: "457746749974-q53thivbphmdfhc21krqdk97qmprdda4.apps.googleusercontent.com",
   recaptchaSiteKey: ""
 };
+
+export const firebaseConfig = (configFile && (configFile as any).projectId) ? configFile : hardcodedConfig;
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 

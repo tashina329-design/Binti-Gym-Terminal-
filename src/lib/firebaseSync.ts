@@ -22,6 +22,25 @@ export interface GymDataStore {
   availableStores?: string[];
 }
 
+function getLocalGymStore(): GymDataStore {
+  try {
+    const saved = localStorage.getItem('gym_data_store_v1');
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return {
+    members: [],
+    attendance: [],
+    expenses: [],
+    sales: [],
+    registeredStaff: [
+      { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }
+    ],
+    activeShift: null,
+    staffPin: '123456',
+    availableStores: ['Binti Gym']
+  };
+}
+
 let cachedDeviceId: string | null = null;
 
 export function getDeviceId(): string {
@@ -179,17 +198,47 @@ export async function authenticateCloudBusinessStore(
           store: data.store as GymDataStore,
         };
       } else {
-        // Not found in cloud. Check local fallback
-        if (cleanName.toLowerCase() === 'binti gym') {
-          return {
-            success: true,
-            businessName: cleanName,
-            pin: cleanPin,
-          };
+        // Not found in cloud yet: auto-register and sync this store to Cloud Firestore so all other devices can connect!
+        const initialStore: GymDataStore = getLocalGymStore();
+        if (!initialStore.availableStores) initialStore.availableStores = [];
+        if (!initialStore.availableStores.includes(cleanName)) {
+          initialStore.availableStores.push(cleanName);
         }
+
+        const payload = {
+          name: cleanName,
+          pin: cleanPin,
+          updatedAt: Date.now(),
+          deviceId: getDeviceId(),
+          store: initialStore,
+        };
+
+        await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
+
+        try {
+          const regDoc = doc(db, 'gym', 'registry');
+          const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
+          const existingStores: string[] =
+            regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
+              ? regSnap.data().stores
+              : ['Binti Gym'];
+          if (!existingStores.includes(cleanName)) {
+            existingStores.push(cleanName);
+            await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
+          }
+        } catch {}
+
+        try {
+          localStorage.setItem('gym_data_store_v1', JSON.stringify(initialStore));
+          localStorage.setItem('current_business_name', cleanName);
+          localStorage.setItem('current_business_pin', cleanPin);
+        } catch {}
+
         return {
-          success: false,
-          message: `Business "${cleanName}" not found in cloud database. If this is a new store, please switch to "Register New Store".`,
+          success: true,
+          businessName: cleanName,
+          pin: cleanPin,
+          store: initialStore,
         };
       }
     } else {

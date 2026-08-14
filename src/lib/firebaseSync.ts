@@ -1,4 +1,4 @@
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface SyncEventPayload {
@@ -46,8 +46,6 @@ const syncChannel =
     ? new BroadcastChannel('binti_gym_live_sync_channel')
     : null;
 
-let lastHandledTimestamp = 0;
-
 export function getStoredBusinessName(): string {
   try {
     return localStorage.getItem('current_business_name') || 'Binti Gym';
@@ -84,17 +82,34 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 }
 
 export async function fetchStoresFromCloud(): Promise<string[]> {
+  const storesSet = new Set<string>(['Binti Gym']);
   try {
     const regDoc = doc(db, 'gym', 'registry');
-    const snap = await withTimeout(getDoc(regDoc), 8000, null as any);
+    const snap = await withTimeout(getDoc(regDoc), 4000, null as any);
     if (snap && snap.exists && snap.exists()) {
       const data = snap.data();
       if (Array.isArray(data.stores)) {
-        return data.stores.filter(Boolean);
+        data.stores.forEach((s: string) => {
+          if (s && s.trim()) storesSet.add(s.trim());
+        });
       }
     }
   } catch {}
-  return ['Binti Gym'];
+
+  try {
+    const storesColl = collection(db, 'gym_stores');
+    const snapColl = await withTimeout(getDocs(storesColl), 4000, null as any);
+    if (snapColl && snapColl.docs) {
+      snapColl.docs.forEach((d: any) => {
+        const dData = d.data();
+        if (dData && dData.name && typeof dData.name === 'string' && dData.name.trim()) {
+          storesSet.add(dData.name.trim());
+        }
+      });
+    }
+  } catch {}
+
+  return Array.from(storesSet);
 }
 
 export async function authenticateCloudBusinessStore(
@@ -107,7 +122,24 @@ export async function authenticateCloudBusinessStore(
   const docRef = getStoreDocRef(cleanName);
 
   try {
-    const snapshot = await withTimeout(getDoc(docRef), 8000, null as any);
+    let snapshot = await withTimeout(getDoc(docRef), 8000, null as any);
+
+    // If direct key doesn't hit, search case-insensitively across gym_stores
+    if (!snapshot || !snapshot.exists || !snapshot.exists()) {
+      try {
+        const storesColl = collection(db, 'gym_stores');
+        const snapColl = await withTimeout(getDocs(storesColl), 5000, null as any);
+        if (snapColl && snapColl.docs) {
+          const matchDoc = snapColl.docs.find((d: any) => {
+            const dName = (d.data()?.name || '').trim().toLowerCase();
+            return dName === cleanName.toLowerCase() || d.id === normalizeStoreKey(cleanName);
+          });
+          if (matchDoc) {
+            snapshot = matchDoc;
+          }
+        }
+      } catch {}
+    }
 
     if (mode === 'login') {
       if (snapshot && snapshot.exists && snapshot.exists()) {
@@ -116,7 +148,7 @@ export async function authenticateCloudBusinessStore(
         if (storedPin !== cleanPin) {
           return {
             success: false,
-            message: `Incorrect 4-digit PIN code for "${cleanName}". Access denied.`,
+            message: `Incorrect 4-digit PIN code for "${data.name || cleanName}". Please check the PIN.`,
           };
         }
         if (data.store) {
@@ -128,6 +160,16 @@ export async function authenticateCloudBusinessStore(
             if (data.store.staffPin) {
               localStorage.setItem('gym_staff_pin', data.store.staffPin);
             }
+            if (data.store.availableStores) {
+              localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
+            }
+            if (data.store.activeShift !== undefined) {
+              if (data.store.activeShift) {
+                localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
+              } else {
+                localStorage.removeItem('gym_active_shift');
+              }
+            }
           } catch {}
         }
         return {
@@ -137,18 +179,41 @@ export async function authenticateCloudBusinessStore(
           store: data.store as GymDataStore,
         };
       } else {
-        // Fallback store when cloud snapshot doesn't exist yet
+        // Not found in cloud. Check local fallback
+        if (cleanName.toLowerCase() === 'binti gym') {
+          return {
+            success: true,
+            businessName: cleanName,
+            pin: cleanPin,
+          };
+        }
         return {
-          success: true,
-          businessName: cleanName,
-          pin: cleanPin,
+          success: false,
+          message: `Business "${cleanName}" not found in cloud database. If this is a new store, please switch to "Register New Store".`,
         };
       }
     } else {
+      // REGISTER MODE
       if (snapshot && snapshot.exists && snapshot.exists()) {
+        const data = snapshot.data();
+        const storedPin = String(data.pin || data.store?.staffPin || '1234').trim();
+        if (storedPin === cleanPin) {
+          // Store already exists and correct PIN entered -> Log them in!
+          if (data.store) {
+            try {
+              localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
+            } catch {}
+          }
+          return {
+            success: true,
+            businessName: data.name || cleanName,
+            pin: cleanPin,
+            store: data.store as GymDataStore,
+          };
+        }
         return {
           success: false,
-          message: `Business "${cleanName}" is already registered. Please select it and enter its 4-digit PIN code to log in.`,
+          message: `Business "${data.name || cleanName}" is already registered. Please switch to "Log In Store" and enter its 4-digit PIN.`,
         };
       }
 
@@ -188,22 +253,25 @@ export async function authenticateCloudBusinessStore(
         store: storeToRegister,
       };
 
-      setDoc(docRef, payload, { merge: true }).catch(() => {});
+      await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
 
       try {
         const regDoc = doc(db, 'gym', 'registry');
-        getDoc(regDoc).then((regSnap) => {
-          const existingStores: string[] =
-            regSnap && regSnap.exists() && Array.isArray(regSnap.data()?.stores) ? regSnap.data().stores : ['Binti Gym'];
-          if (!existingStores.includes(cleanName)) {
-            existingStores.push(cleanName);
-            setDoc(regDoc, { stores: existingStores }, { merge: true }).catch(() => {});
-          }
-        }).catch(() => {});
+        const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
+        const existingStores: string[] =
+          regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
+            ? regSnap.data().stores
+            : ['Binti Gym'];
+        if (!existingStores.includes(cleanName)) {
+          existingStores.push(cleanName);
+          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
+        }
       } catch {}
 
       try {
         localStorage.setItem('gym_data_store_v1', JSON.stringify(storeToRegister));
+        localStorage.setItem('current_business_name', cleanName);
+        localStorage.setItem('current_business_pin', cleanPin);
       } catch {}
 
       return {
@@ -248,9 +316,27 @@ export async function syncStoreToBackend(store: GymDataStore, businessName?: str
 
 export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
   try {
-    const activeBiz = businessName || getStoredBusinessName();
+    const activeBiz = (businessName || getStoredBusinessName()).trim();
     const storeDocRef = getStoreDocRef(activeBiz);
-    const snapshot = await withTimeout(getDoc(storeDocRef), 8000, null as any);
+    let snapshot = await withTimeout(getDoc(storeDocRef), 8000, null as any);
+
+    // If direct lookup fails, search across gym_stores
+    if (!snapshot || !snapshot.exists || !snapshot.exists()) {
+      try {
+        const storesColl = collection(db, 'gym_stores');
+        const snapColl = await withTimeout(getDocs(storesColl), 4000, null as any);
+        if (snapColl && snapColl.docs) {
+          const matchDoc = snapColl.docs.find((d: any) => {
+            const dName = (d.data()?.name || '').trim().toLowerCase();
+            return dName === activeBiz.toLowerCase() || d.id === normalizeStoreKey(activeBiz);
+          });
+          if (matchDoc) {
+            snapshot = matchDoc;
+          }
+        }
+      } catch {}
+    }
+
     if (snapshot && snapshot.exists && snapshot.exists()) {
       const data = snapshot.data();
       if (data.store) {
@@ -294,7 +380,7 @@ export function subscribeLiveSync(
   let unsubFirestore = () => {};
   let subscriberLastTimestamp = 0;
   const myDeviceId = getDeviceId();
-  const activeBiz = businessName || getStoredBusinessName();
+  const activeBiz = (businessName || getStoredBusinessName()).trim();
 
   const updateNetworkStatus = () => {
     if (typeof window !== 'undefined' && !window.navigator.onLine) {
@@ -304,10 +390,8 @@ export function subscribeLiveSync(
 
   updateNetworkStatus();
 
-  // Listen to window online/offline events
   const handleOnline = () => {
     if (onStatusChange) onStatusChange('connected');
-    // Auto re-sync pending offline changes when coming back online
     try {
       const pending = localStorage.getItem('gym_pending_offline_sync');
       if (pending === 'true') {
@@ -343,13 +427,12 @@ export function subscribeLiveSync(
           const updatedAt = data.updatedAt || 0;
           const isRemote = data.deviceId ? data.deviceId !== myDeviceId : false;
 
-          // Always accept remote changes or newer timestamps
+          // Accept remote changes or newer timestamps
           if (isRemote || updatedAt > subscriberLastTimestamp) {
             if (updatedAt > subscriberLastTimestamp) {
               subscriberLastTimestamp = updatedAt;
             }
 
-            // Sync remote store into local storage if present
             if (data.store) {
               try {
                 localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
@@ -380,7 +463,7 @@ export function subscribeLiveSync(
         }
       },
       (error) => {
-        console.warn('Firestore live sync listener reconnecting or offline:', error);
+        console.warn('Firestore live sync listener status:', error);
         const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
         if (onStatusChange) onStatusChange(isOnline ? 'reconnecting' : 'offline');
       }
@@ -447,10 +530,9 @@ export function subscribeLiveSync(
 export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?: GymDataStore, businessName?: string) {
   const timestamp = Date.now();
   const myDeviceId = getDeviceId();
-  const activeBiz = businessName || getStoredBusinessName();
+  const activeBiz = (businessName || getStoredBusinessName()).trim();
   const activePin = getStoredBusinessPin();
 
-  // Load latest store if not provided
   let storeToSync = storeData;
   if (!storeToSync && typeof localStorage !== 'undefined') {
     try {
@@ -468,16 +550,12 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     store: storeToSync || null,
   };
 
-  // Broadcast to BroadcastChannel (local tabs)
   if (syncChannel) {
     try {
       syncChannel.postMessage(payload);
-    } catch (e) {
-      console.warn('BroadcastChannel error:', e);
-    }
+    } catch (e) {}
   }
 
-  // LocalStorage sync trigger
   try {
     localStorage.setItem('gym_live_sync_trigger', JSON.stringify(payload));
   } catch {}
@@ -486,7 +564,6 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     syncStoreToBackend(storeToSync, activeBiz);
   }
 
-  // Check if offline
   const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
   if (isOffline) {
     try {
@@ -494,30 +571,29 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     } catch {}
   }
 
-  // Broadcast to Firestore asynchronously for real-time multi-device cloud synchronization
   (async () => {
     try {
       const storeDocRef = getStoreDocRef(activeBiz);
-      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 10000, null);
+      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 8000, null);
 
-      // Keep cloud registry doc updated
       try {
         const regDoc = doc(db, 'gym', 'registry');
-        const regSnap = await withTimeout(getDoc(regDoc), 5000, null as any);
+        const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
         const existingStores: string[] =
           regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
             ? regSnap.data().stores
             : ['Binti Gym'];
         if (!existingStores.includes(activeBiz)) {
           existingStores.push(activeBiz);
-          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 5000, null);
+          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
         }
       } catch {}
     } catch (err) {
-      console.warn('Firestore broadcastLiveSync notice (cached locally if offline):', err);
+      console.warn('Firestore broadcastLiveSync notice:', err);
       try {
         localStorage.setItem('gym_pending_offline_sync', 'true');
       } catch {}
     }
   })();
 }
+

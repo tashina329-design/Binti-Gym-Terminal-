@@ -599,6 +599,7 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     store: storeToSync || null,
   };
 
+  // 1. Same-browser cross-tab sync
   if (syncChannel) {
     try {
       syncChannel.postMessage(payload);
@@ -609,40 +610,38 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     localStorage.setItem('gym_live_sync_trigger', JSON.stringify(payload));
   } catch {}
 
+  // 2. Sync to local backend server
   if (storeToSync) {
     syncStoreToBackend(storeToSync, activeBiz);
   }
 
-  const isOffline = typeof window !== 'undefined' && !window.navigator.onLine;
-  if (isOffline) {
-    try {
-      localStorage.setItem('gym_pending_offline_sync', 'true');
-    } catch {}
-  }
+  // 3. Write directly to Firestore cloud database for instant cross-device sync
+  try {
+    const storeDocRef = getStoreDocRef(activeBiz);
+    await setDoc(storeDocRef, payload, { merge: true });
 
-  (async () => {
+    // Update global registry of stores
     try {
-      const storeDocRef = getStoreDocRef(activeBiz);
-      await withTimeout(setDoc(storeDocRef, payload, { merge: true }), 8000, null);
-
-      try {
-        const regDoc = doc(db, 'gym', 'registry');
-        const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
-        const existingStores: string[] =
-          regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
-            ? regSnap.data().stores
-            : ['Binti Gym'];
-        if (!existingStores.includes(activeBiz)) {
-          existingStores.push(activeBiz);
-          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
-        }
-      } catch {}
-    } catch (err) {
-      console.warn('Firestore broadcastLiveSync notice:', err);
+      const regDoc = doc(db, 'gym', 'registry');
+      const regSnap = await getDoc(regDoc);
+      const existingStores: string[] =
+        regSnap && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
+          ? regSnap.data().stores
+          : ['Binti Gym'];
+      if (!existingStores.includes(activeBiz)) {
+        existingStores.push(activeBiz);
+        await setDoc(regDoc, { stores: existingStores, updatedAt: timestamp }, { merge: true });
+      }
+    } catch (regErr) {
+      console.warn('Registry update notice:', regErr);
+    }
+  } catch (err) {
+    console.warn('Firestore cloud broadcast error (queued locally by SDK):', err);
+    if (typeof window !== 'undefined' && !window.navigator.onLine) {
       try {
         localStorage.setItem('gym_pending_offline_sync', 'true');
       } catch {}
     }
-  })();
+  }
 }
 

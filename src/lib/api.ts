@@ -220,7 +220,7 @@ export function loadClientStore(): GymDataStore {
     // Fallback
   }
   const defaultStore = getDefaultStore();
-  saveClientStore(defaultStore);
+  saveClientStoreLocally(defaultStore);
   return defaultStore;
 }
 
@@ -1034,7 +1034,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
         const data = await res.json();
         if (data && data.store) {
           try {
-            saveClientStoreLocally(data.store);
+            saveClientStore(data.store);
           } catch {}
         }
         return data as T;
@@ -1044,7 +1044,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
         const fallbackRes = handleClientFallbackRequest(url, options) as any;
         if (fallbackRes && fallbackRes.store) {
           try {
-            saveClientStoreLocally(fallbackRes.store);
+            saveClientStore(fallbackRes.store);
           } catch {}
         }
         return fallbackRes as T;
@@ -1057,7 +1057,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
         const parsed = JSON.parse(text);
         if (parsed && parsed.store) {
           try {
-            saveClientStoreLocally(parsed.store);
+            saveClientStore(parsed.store);
           } catch {}
         }
         return parsed as T;
@@ -1067,7 +1067,7 @@ export async function apiFetch<T = any>(url: string, options?: RequestInit): Pro
         const fallbackRes = handleClientFallbackRequest(url, options) as any;
         if (fallbackRes && fallbackRes.store) {
           try {
-            saveClientStoreLocally(fallbackRes.store);
+            saveClientStore(fallbackRes.store);
           } catch {}
         }
         return fallbackRes as T;

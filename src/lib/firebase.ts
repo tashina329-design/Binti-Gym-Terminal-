@@ -1,19 +1,40 @@
-import { initializeApp } from 'firebase/app';
-import { getFirestore, enableMultiTabIndexedDbPersistence, enableIndexedDbPersistence } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, memoryLocalCache, Firestore } from 'firebase/firestore';
+import configFile from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const firebaseConfig = configFile || {
+  projectId: "bubbly-origin-nv7sv",
+  appId: "1:457746749974:web:0136c1f2067898b4897337",
+  apiKey: "AIzaSyC497CCzVzCln1x4Qy0GeldWd3v-VergfI",
+  authDomain: "bubbly-origin-nv7sv.firebaseapp.com",
+  storageBucket: "bubbly-origin-nv7sv.firebasestorage.app",
+  messagingSenderId: "457746749974",
+  measurementId: "",
+  oAuthClientId: "457746749974-q53thivbphmdfhc21krqdk97qmprdda4.apps.googleusercontent.com",
+  recaptchaSiteKey: ""
+};
 
-// Enable offline IndexedDB persistence safely for multi-tab operations
-if (typeof window !== 'undefined') {
-  if (typeof enableMultiTabIndexedDbPersistence === 'function') {
-    enableMultiTabIndexedDbPersistence(db).catch(() => {
-      enableIndexedDbPersistence(db).catch(() => {});
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+
+let firestoreInstance: Firestore;
+
+try {
+  firestoreInstance = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  });
+} catch (err) {
+  try {
+    firestoreInstance = initializeFirestore(app, {
+      localCache: memoryLocalCache()
     });
-  } else {
-    enableIndexedDbPersistence(db).catch(() => {});
+  } catch (err2) {
+    firestoreInstance = getFirestore(app);
   }
 }
+
+export const db = firestoreInstance;
+
 
 

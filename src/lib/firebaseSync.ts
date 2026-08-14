@@ -22,6 +22,33 @@ export interface GymDataStore {
   availableStores?: string[];
 }
 
+export function extractStoreFromDoc(data: any): GymDataStore {
+  if (data?.store && Array.isArray(data.store.members)) {
+    const s = data.store;
+    return {
+      members: Array.isArray(s.members) ? s.members : [],
+      attendance: Array.isArray(s.attendance) ? s.attendance : [],
+      sales: Array.isArray(s.sales) ? s.sales : [],
+      expenses: Array.isArray(s.expenses) ? s.expenses : [],
+      registeredStaff: Array.isArray(s.registeredStaff) && s.registeredStaff.length > 0 ? s.registeredStaff : [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }],
+      activeShift: s.activeShift !== undefined ? s.activeShift : null,
+      staffPin: s.staffPin || '123456',
+      availableStores: Array.isArray(s.availableStores) && s.availableStores.length > 0 ? s.availableStores : ['Binti Gym'],
+    };
+  }
+
+  return {
+    members: Array.isArray(data?.members) ? data.members : [],
+    attendance: Array.isArray(data?.attendance) ? data.attendance : [],
+    sales: Array.isArray(data?.sales) ? data.sales : [],
+    expenses: Array.isArray(data?.expenses) ? data.expenses : [],
+    registeredStaff: Array.isArray(data?.registeredStaff) && data.registeredStaff.length > 0 ? data.registeredStaff : [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }],
+    activeShift: data?.activeShift !== undefined ? data.activeShift : null,
+    staffPin: data?.staffPin || data?.pin || '123456',
+    availableStores: Array.isArray(data?.availableStores) && data.availableStores.length > 0 ? data.availableStores : ['Binti Gym'],
+  };
+}
+
 function getLocalGymStore(): GymDataStore {
   try {
     const saved = localStorage.getItem('gym_data_store_v1');
@@ -170,32 +197,32 @@ export async function authenticateCloudBusinessStore(
             message: `Incorrect 4-digit PIN code for "${data.name || cleanName}". Please check the PIN.`,
           };
         }
-        if (data.store) {
-          try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
-            if (data.store.registeredStaff) {
-              localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+        const store = extractStoreFromDoc(data);
+        try {
+          localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
+          if (store.registeredStaff) {
+            localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
+          }
+          if (store.staffPin) {
+            localStorage.setItem('gym_staff_pin', store.staffPin);
+          }
+          if (store.availableStores) {
+            localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
+          }
+          if (store.activeShift !== undefined) {
+            if (store.activeShift) {
+              localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
+            } else {
+              localStorage.removeItem('gym_active_shift');
             }
-            if (data.store.staffPin) {
-              localStorage.setItem('gym_staff_pin', data.store.staffPin);
-            }
-            if (data.store.availableStores) {
-              localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
-            }
-            if (data.store.activeShift !== undefined) {
-              if (data.store.activeShift) {
-                localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
-              } else {
-                localStorage.removeItem('gym_active_shift');
-              }
-            }
-          } catch {}
-        }
+          }
+        } catch {}
+
         return {
           success: true,
           businessName: data.name || cleanName,
           pin: cleanPin,
-          store: data.store as GymDataStore,
+          store,
         };
       } else {
         // Not found in cloud yet: auto-register and sync this store to Cloud Firestore so all other devices can connect!
@@ -211,6 +238,14 @@ export async function authenticateCloudBusinessStore(
           updatedAt: Date.now(),
           deviceId: getDeviceId(),
           store: initialStore,
+          members: initialStore.members || [],
+          attendance: initialStore.attendance || [],
+          sales: initialStore.sales || [],
+          expenses: initialStore.expenses || [],
+          registeredStaff: initialStore.registeredStaff || [],
+          activeShift: initialStore.activeShift || null,
+          staffPin: cleanPin,
+          availableStores: initialStore.availableStores || [cleanName],
         };
 
         await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
@@ -247,17 +282,15 @@ export async function authenticateCloudBusinessStore(
         const data = snapshot.data();
         const storedPin = String(data.pin || data.store?.staffPin || '1234').trim();
         if (storedPin === cleanPin) {
-          // Store already exists and correct PIN entered -> Log them in!
-          if (data.store) {
-            try {
-              localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
-            } catch {}
-          }
+          const store = extractStoreFromDoc(data);
+          try {
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
+          } catch {}
           return {
             success: true,
             businessName: data.name || cleanName,
             pin: cleanPin,
-            store: data.store as GymDataStore,
+            store,
           };
         }
         return {
@@ -300,6 +333,14 @@ export async function authenticateCloudBusinessStore(
         updatedAt: Date.now(),
         deviceId: getDeviceId(),
         store: storeToRegister,
+        members: storeToRegister.members || [],
+        attendance: storeToRegister.attendance || [],
+        sales: storeToRegister.sales || [],
+        expenses: storeToRegister.expenses || [],
+        registeredStaff: storeToRegister.registeredStaff || [],
+        activeShift: storeToRegister.activeShift || null,
+        staffPin: cleanPin,
+        availableStores: [cleanName],
       };
 
       await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
@@ -388,21 +429,22 @@ export async function fetchCloudStore(businessName?: string): Promise<GymDataSto
 
     if (snapshot && snapshot.exists && snapshot.exists()) {
       const data = snapshot.data();
-      if (data.store) {
+      const store = extractStoreFromDoc(data);
+      if (store) {
         try {
-          localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
-          if (data.store.registeredStaff) {
-            localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+          localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
+          if (store.registeredStaff) {
+            localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
           }
-          if (data.store.staffPin) {
-            localStorage.setItem('gym_staff_pin', data.store.staffPin);
+          if (store.staffPin) {
+            localStorage.setItem('gym_staff_pin', store.staffPin);
           }
-          if (data.store.availableStores) {
-            localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
+          if (store.availableStores) {
+            localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
           }
-          if (data.store.activeShift !== undefined) {
-            if (data.store.activeShift) {
-              localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
+          if (store.activeShift !== undefined) {
+            if (store.activeShift) {
+              localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
             } else {
               localStorage.removeItem('gym_active_shift');
             }
@@ -411,8 +453,8 @@ export async function fetchCloudStore(businessName?: string): Promise<GymDataSto
           console.warn('Failed to sync cloud store to localStorage:', e);
         }
 
-        syncStoreToBackend(data.store, activeBiz);
-        return data.store as GymDataStore;
+        syncStoreToBackend(store, activeBiz);
+        return store;
       }
     }
   } catch (err) {
@@ -473,30 +515,29 @@ export function subscribeLiveSync(
         if (onStatusChange) onStatusChange(isOnline ? 'connected' : 'offline');
         if (snapshot.exists()) {
           const data = snapshot.data();
-          const updatedAt = data.updatedAt || 0;
-          const isRemote = data.deviceId ? data.deviceId !== myDeviceId : false;
+          const updatedAt = Number(data.updatedAt) || 0;
+          const isRemote = Boolean(data.deviceId && data.deviceId !== myDeviceId);
+          const store = extractStoreFromDoc(data);
 
           // Accept remote changes or newer timestamps
           if (isRemote || updatedAt > subscriberLastTimestamp) {
-            if (updatedAt > subscriberLastTimestamp) {
-              subscriberLastTimestamp = updatedAt;
-            }
+            subscriberLastTimestamp = Math.max(subscriberLastTimestamp, updatedAt);
 
-            if (data.store) {
+            if (store) {
               try {
-                localStorage.setItem('gym_data_store_v1', JSON.stringify(data.store));
-                if (data.store.registeredStaff) {
-                  localStorage.setItem('gym_registered_staff', JSON.stringify(data.store.registeredStaff));
+                localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
+                if (store.registeredStaff) {
+                  localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
                 }
-                if (data.store.staffPin) {
-                  localStorage.setItem('gym_staff_pin', data.store.staffPin);
+                if (store.staffPin) {
+                  localStorage.setItem('gym_staff_pin', store.staffPin);
                 }
-                if (data.store.availableStores) {
-                  localStorage.setItem('gym_available_stores', JSON.stringify(data.store.availableStores));
+                if (store.availableStores) {
+                  localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
                 }
-                if (data.store.activeShift !== undefined) {
-                  if (data.store.activeShift) {
-                    localStorage.setItem('gym_active_shift', JSON.stringify(data.store.activeShift));
+                if (store.activeShift !== undefined) {
+                  if (store.activeShift) {
+                    localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
                   } else {
                     localStorage.removeItem('gym_active_shift');
                   }
@@ -504,10 +545,10 @@ export function subscribeLiveSync(
               } catch (e) {
                 console.warn('Error updating local cache from remote cloud store:', e);
               }
-              await syncStoreToBackend(data.store, activeBiz);
+              await syncStoreToBackend(store, activeBiz);
             }
 
-            onUpdate(data.lastEvent || undefined, isRemote, data.store || undefined);
+            onUpdate(data.lastEvent || undefined, isRemote, store);
           }
         }
       },
@@ -522,7 +563,25 @@ export function subscribeLiveSync(
     if (onStatusChange) onStatusChange('offline');
   }
 
-  // 2. Listen to BroadcastChannel for local cross-tab instant sync
+  // 2. Periodic cloud sync poll to guarantee background updates across networks
+  const pollInterval = setInterval(async () => {
+    try {
+      const storeDocRef = getStoreDocRef(activeBiz);
+      const snap = await getDoc(storeDocRef);
+      if (snap && snap.exists()) {
+        const data = snap.data();
+        const updatedAt = Number(data.updatedAt) || 0;
+        const isRemote = Boolean(data.deviceId && data.deviceId !== myDeviceId);
+        if (updatedAt > subscriberLastTimestamp && isRemote) {
+          subscriberLastTimestamp = updatedAt;
+          const store = extractStoreFromDoc(data);
+          onUpdate(data.lastEvent || undefined, isRemote, store);
+        }
+      }
+    } catch {}
+  }, 10000);
+
+  // 3. Listen to BroadcastChannel for local cross-tab instant sync
   const handleBroadcast = (event: MessageEvent) => {
     if (event.data) {
       const isRemote = event.data.deviceId !== myDeviceId;
@@ -530,12 +589,13 @@ export function subscribeLiveSync(
         if (event.data.updatedAt > subscriberLastTimestamp) {
           subscriberLastTimestamp = event.data.updatedAt;
         }
-        if (event.data.store) {
+        const store = extractStoreFromDoc(event.data);
+        if (store) {
           try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(event.data.store));
+            localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
           } catch {}
         }
-        onUpdate(event.data.lastEvent || undefined, isRemote, event.data.store || undefined);
+        onUpdate(event.data.lastEvent || undefined, isRemote, store);
       }
     }
   };
@@ -544,7 +604,7 @@ export function subscribeLiveSync(
     syncChannel.addEventListener('message', handleBroadcast);
   }
 
-  // 3. Storage event fallback for cross-tab sync
+  // 4. Storage event fallback for cross-tab sync
   const handleStorage = (e: StorageEvent) => {
     if (e.key === 'gym_live_sync_trigger') {
       try {
@@ -554,7 +614,8 @@ export function subscribeLiveSync(
           if (parsed.updatedAt > subscriberLastTimestamp) {
             subscriberLastTimestamp = parsed.updatedAt;
           }
-          onUpdate(parsed.lastEvent || undefined, isRemote, parsed.store || undefined);
+          const store = extractStoreFromDoc(parsed);
+          onUpdate(parsed.lastEvent || undefined, isRemote, store);
         }
       } catch {}
     }
@@ -565,6 +626,7 @@ export function subscribeLiveSync(
 
   return () => {
     unsubFirestore();
+    clearInterval(pollInterval);
     if (syncChannel) {
       syncChannel.removeEventListener('message', handleBroadcast);
     }
@@ -597,6 +659,14 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     deviceId: myDeviceId,
     lastEvent: eventData ? { ...eventData, deviceId: myDeviceId } : null,
     store: storeToSync || null,
+    members: storeToSync?.members || [],
+    attendance: storeToSync?.attendance || [],
+    sales: storeToSync?.sales || [],
+    expenses: storeToSync?.expenses || [],
+    registeredStaff: storeToSync?.registeredStaff || [],
+    activeShift: storeToSync?.activeShift !== undefined ? storeToSync.activeShift : null,
+    staffPin: storeToSync?.staffPin || activePin,
+    availableStores: storeToSync?.availableStores || [activeBiz],
   };
 
   // 1. Same-browser cross-tab sync
@@ -644,4 +714,3 @@ export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?
     }
   }
 }
-

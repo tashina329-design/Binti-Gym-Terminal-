@@ -948,7 +948,7 @@ apiRouter.post('/checkin/phone', (req, res, next) => {
     });
 
     saveData(store, bizName);
-    return res.json({ success: true, message: `Welcome back, ${member.name}!`, store });
+    return res.json({ success: true, message: `Welcome back, ${member.name}!`, store, members: [matches[0]] });
   } catch (err) {
     next(err);
   }

@@ -1,10 +1,12 @@
 {
   "entities": {
-    "GymData": {
-      "title": "Gym Data Store",
-      "description": "Live synchronized data for sales, attendance, members, staff, shifts, and expenses across all devices",
+    "GymStore": {
+      "title": "Gym Store Data",
+      "description": "Live synchronized data for a specific gym store including members, attendance, sales, expenses, staff, and active shifts",
       "type": "object",
       "properties": {
+        "name": { "type": "string" },
+        "pin": { "type": "string" },
         "updatedAt": { "type": "number" },
         "deviceId": { "type": "string" },
         "members": { "type": "array" },
@@ -13,14 +15,30 @@
         "expenses": { "type": "array" },
         "registeredStaff": { "type": "array" },
         "activeShift": { "type": "object" },
-        "staffPin": { "type": "string" }
+        "staffPin": { "type": "string" },
+        "availableStores": { "type": "array" }
+      }
+    },
+    "GymRegistry": {
+      "title": "Gym Registry",
+      "description": "Registry of registered gym stores and broadcast sync notifications",
+      "type": "object",
+      "properties": {
+        "stores": { "type": "array" },
+        "lastEvent": { "type": "object" },
+        "updatedAt": { "type": "number" }
       }
     }
   },
   "firestore": {
     "/gym/{docId}": {
-      "schema": { "$ref": "#/entities/GymData" },
-      "description": "Central collection for live sync state across devices"
+      "schema": { "$ref": "#/entities/GymRegistry" },
+      "description": "Central collection for live sync state and store registry"
+    },
+    "/gym_stores/{storeKey}": {
+      "schema": { "$ref": "#/entities/GymStore" },
+      "description": "Individual business store data collection"
     }
   }
 }
+

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Building2, Lock, KeyRound, ArrowRight, ShieldCheck, PlusCircle, LogIn, Store } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Building2, Lock, KeyRound, ArrowRight, ShieldCheck, PlusCircle, LogIn, Store, Sparkles } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { authenticateCloudBusinessStore, fetchStoresFromCloud, broadcastLiveSync } from '../lib/firebaseSync';
 
@@ -18,14 +18,14 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
   canClose = false,
   onClose,
 }) => {
-  const [mode, setMode] = useState<'login' | 'register'>('register');
-  const [businessName, setBusinessName] = useState(currentBusinessName);
-  const [selectedStoreFromList, setSelectedStoreFromList] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [businessName, setBusinessName] = useState(currentBusinessName || 'Binti Gym');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [existingStores, setExistingStores] = useState<string[]>([]);
+  const hiddenInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -33,8 +33,11 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
       setError(null);
       setPin('');
       setConfirmPin('');
+      if (currentBusinessName) {
+        setBusinessName(currentBusinessName);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, currentBusinessName]);
 
   const loadExistingStores = async () => {
     try {
@@ -47,14 +50,12 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
       } catch {}
 
       const cloudNames = await fetchStoresFromCloud();
-      const merged = Array.from(new Set([...serverNames, ...cloudNames])).filter(Boolean);
+      const merged = Array.from(new Set([...serverNames, ...cloudNames, 'Binti Gym'])).filter(Boolean);
 
       if (merged.length > 0) {
         setExistingStores(merged);
         if (!businessName) {
-          setSelectedStoreFromList(merged[0]);
           setBusinessName(merged[0]);
-          setMode('login');
         }
       }
     } catch {
@@ -76,89 +77,109 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
     setError(null);
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (/^[0-9]$/.test(e.key)) {
+      handleDigitClick(e.key);
+    } else if (e.key === 'Backspace') {
+      handleBackspace();
+    } else if (e.key === 'Enter' && pin.length === 4) {
+      handleSubmit();
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
 
-    const activeName = (mode === 'login' && selectedStoreFromList ? selectedStoreFromList : businessName).trim();
+    const activeName = businessName.trim();
 
     if (!activeName) {
-      setError('Please enter or select a Business Name.');
+      setError('Please enter your Business Name.');
       return;
     }
 
     if (pin.length !== 4 || !/^\d{4}$/.test(pin)) {
-      setError('Please enter a valid 4-digit PIN code.');
+      setError('Please enter a 4-digit PIN code.');
       return;
     }
 
     if (mode === 'register') {
       if (pin !== confirmPin) {
-        setError('PIN codes do not match. Please try again.');
+        setError('PIN codes do not match. Please re-enter.');
         return;
       }
     }
 
     setLoading(true);
     try {
-      const endpoint = mode === 'register' ? '/api/stores/register' : '/api/stores/login';
-      const res = await apiFetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: activeName, pin }),
-      });
-
-      if (res && res.success) {
-        localStorage.setItem('current_business_name', activeName);
-        localStorage.setItem('current_business_pin', pin);
-        if (res.store) {
-          try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(res.store));
-          } catch {}
-        }
-        broadcastLiveSync(undefined, res.store, activeName);
-        onAuthenticated(activeName, pin);
-        return;
-      } else if (res && res.message && res.message.includes('Incorrect 4-digit PIN')) {
-        setError(res.message);
-        return;
-      }
-
-      // Try direct cloud authentication across devices if API was not definitive or in fallback mode
+      // 1. Direct Cloud Firestore authentication as primary cross-device source of truth
       const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
+
       if (cloudRes.success) {
-        localStorage.setItem('current_business_name', activeName);
+        const finalName = cloudRes.businessName || activeName;
+        localStorage.setItem('current_business_name', finalName);
         localStorage.setItem('current_business_pin', pin);
+        localStorage.setItem('current_store_name', finalName);
+
         if (cloudRes.store) {
           try {
             localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
           } catch {}
         }
-        broadcastLiveSync(undefined, cloudRes.store, activeName);
-        onAuthenticated(activeName, pin);
+
+        // Notify other devices via real-time broadcast
+        broadcastLiveSync(
+          {
+            type: 'reset',
+            title: '🏢 Terminal Connected',
+            message: `Terminal connected to ${finalName}`,
+          },
+          cloudRes.store,
+          finalName
+        );
+
+        // Notify server backend if present
+        try {
+          const endpoint = mode === 'register' ? '/api/stores/register' : '/api/stores/login';
+          await apiFetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: finalName, pin }),
+          });
+        } catch {}
+
+        onAuthenticated(finalName, pin);
+        return;
       } else {
-        setError(cloudRes.message || 'Authentication failed. Check business name and 4-digit PIN.');
+        setError(cloudRes.message || 'Authentication failed. Please check your 4-digit PIN code.');
       }
     } catch (err: any) {
-      // Fallback to cloud authentication
+      // Fallback try API fetch
       try {
-        const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
-        if (cloudRes.success) {
+        const endpoint = mode === 'register' ? '/api/stores/register' : '/api/stores/login';
+        const res = await apiFetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: activeName, pin }),
+        });
+
+        if (res && res.success) {
           localStorage.setItem('current_business_name', activeName);
           localStorage.setItem('current_business_pin', pin);
-          if (cloudRes.store) {
+          localStorage.setItem('current_store_name', activeName);
+          if (res.store) {
             try {
-              localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
+              localStorage.setItem('gym_data_store_v1', JSON.stringify(res.store));
             } catch {}
           }
-          broadcastLiveSync(undefined, cloudRes.store, activeName);
+          broadcastLiveSync(undefined, res.store, activeName);
           onAuthenticated(activeName, pin);
           return;
         } else {
-          setError(cloudRes.message || 'Authentication failed. Check business name and 4-digit PIN.');
+          setError(res?.message || 'Authentication failed. Please check your Business Name and PIN.');
         }
-      } catch {
-        setError(err?.message || 'Failed to connect. Check 4-digit PIN and try again.');
+      } catch (err2: any) {
+        setError(err2?.message || 'Connection error. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -166,7 +187,11 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in"
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+    >
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 bg-gradient-to-b from-slate-800/80 to-slate-900 border-b border-slate-800 text-center relative">
@@ -174,6 +199,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
             <button
               onClick={onClose}
               className="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition"
+              title="Close"
             >
               ✕
             </button>
@@ -181,9 +207,9 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mb-3 shadow-inner">
             <Building2 className="w-7 h-7" />
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Business & Terminal Terminal</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">Business Store Terminal</h2>
           <p className="text-xs text-slate-400 mt-1">
-            Isolated store database synced across all devices
+            Real-time multi-device cloud database sync
           </p>
 
           {/* Mode Switcher */}
@@ -232,48 +258,60 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
             </div>
           )}
 
-          {/* Business Name Field */}
+          {/* Business Name Field (Always fully editable) */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Store className="w-3.5 h-3.5 text-emerald-400" />
-              Business Name
+            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Store className="w-3.5 h-3.5 text-emerald-400" />
+                Business Name
+              </span>
+              <span className="text-[11px] text-emerald-400/80 font-medium">Directly Editable</span>
             </label>
 
-            {mode === 'login' && existingStores.length > 0 ? (
-              <div className="space-y-2">
-                <select
-                  value={selectedStoreFromList}
-                  onChange={(e) => {
-                    setSelectedStoreFromList(e.target.value);
-                    setBusinessName(e.target.value);
-                  }}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
-                >
-                  {existingStores.map((store) => (
-                    <option key={store} value={store}>
-                      {store}
-                    </option>
-                  ))}
-                </select>
-                <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Or enter custom business name:</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStoreFromList('')}
-                    className="text-emerald-400 hover:underline"
-                  >
-                    Type Name
-                  </button>
-                </div>
-              </div>
-            ) : (
+            <div className="relative">
               <input
                 type="text"
+                list="business-stores-datalist"
                 placeholder="e.g. Binti Gym, Alpha Fitness"
                 value={businessName}
-                onChange={(e) => setBusinessName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                onChange={(e) => {
+                  setBusinessName(e.target.value);
+                  setError(null);
+                }}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition font-medium"
+                autoComplete="organization"
               />
+              <datalist id="business-stores-datalist">
+                {existingStores.map((store) => (
+                  <option key={store} value={store} />
+                ))}
+              </datalist>
+            </div>
+
+            {/* Quick Suggestions Chips */}
+            {existingStores.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-slate-500 mr-1 flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5 text-slate-500" /> Quick select:
+                </span>
+                {existingStores.map((store) => (
+                  <button
+                    key={store}
+                    type="button"
+                    onClick={() => {
+                      setBusinessName(store);
+                      setError(null);
+                    }}
+                    className={`text-[11px] px-2.5 py-1 rounded-lg border transition ${
+                      businessName.trim().toLowerCase() === store.trim().toLowerCase()
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-medium'
+                        : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/60 text-slate-300'
+                    }`}
+                  >
+                    {store}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
@@ -287,8 +325,11 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
               <span className="text-[11px] text-slate-500">4 Numeric Digits</span>
             </label>
 
-            {/* PIN Code Box */}
-            <div className="flex justify-center items-center gap-3 py-2">
+            {/* Visual PIN Code Box */}
+            <div
+              onClick={() => hiddenInputRef.current?.focus()}
+              className="flex justify-center items-center gap-3 py-2 cursor-pointer"
+            >
               {[0, 1, 2, 3].map((idx) => {
                 const filled = pin.length > idx;
                 return (
@@ -296,7 +337,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
                     key={idx}
                     className={`w-12 h-14 rounded-xl border flex items-center justify-center text-xl font-bold transition-all ${
                       filled
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400 shadow-sm'
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400 shadow-sm scale-105'
                         : 'border-slate-800 bg-slate-950 text-slate-600'
                     }`}
                   >
@@ -305,6 +346,23 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
                 );
               })}
             </div>
+
+            {/* Hidden Input for Mobile/Tablet Software Keyboard */}
+            <input
+              ref={hiddenInputRef}
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                setPin(val);
+                setError(null);
+              }}
+              className="sr-only"
+              aria-label="4-digit PIN"
+            />
           </div>
 
           {/* Confirm PIN in Register Mode */}
@@ -318,16 +376,18 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
               </label>
               <input
                 type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 maxLength={4}
                 placeholder="Confirm 4-Digit PIN"
                 value={confirmPin}
                 onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-center tracking-widest text-lg font-bold text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-center tracking-widest text-lg font-bold text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
               />
             </div>
           )}
 
-          {/* Onscreen Keypad for quick 4-Digit entry */}
+          {/* Onscreen Keypad for fast touch on tablet & mobile */}
           <div className="grid grid-cols-3 gap-2 pt-1">
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
               <button
@@ -375,7 +435,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
               <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
             ) : (
               <>
-                <span>{mode === 'register' ? 'Register Store & Sync' : 'Connect & Lock Terminal'}</span>
+                <span>{mode === 'register' ? 'Register Store & Connect' : 'Log In & Sync Terminal'}</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -385,3 +445,4 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
     </div>
   );
 };
+

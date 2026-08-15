@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
 import configFile from '../../firebase-applet-config.json';
 
@@ -12,16 +12,40 @@ const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 export const db: Firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 export const auth = getAuth(app);
 
-// Verify Firestore connection non-blockingly
-(async () => {
-  try {
-    const testDoc = doc(db, 'gym', 'registry');
-    await getDoc(testDoc);
-    console.log('Firebase Firestore connected successfully to db:', databaseId || '(default)');
-  } catch (error) {
-    console.warn('Firebase connection check:', error);
+let authInitPromise: Promise<User | null> | null = null;
+
+export async function ensureFirebaseAuth(): Promise<User | null> {
+  if (auth.currentUser) return auth.currentUser;
+  if (authInitPromise) return authInitPromise;
+
+  authInitPromise = new Promise<User | null>((resolve) => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      unsub();
+      if (user) {
+        resolve(user);
+      } else {
+        try {
+          const cred = await signInAnonymously(auth);
+          resolve(cred.user);
+        } catch (err) {
+          console.warn('Firebase anonymous auth notice:', err);
+          resolve(null);
+        }
+      }
+    });
+  });
+
+  return authInitPromise;
+}
+
+// Automatically ensure authenticated session on app initialization
+ensureFirebaseAuth().then((user) => {
+  if (user) {
+    console.log('Firebase Auth initialized for terminal session uid:', user.uid);
   }
-})();
+}).catch((err) => {
+  console.warn('Firebase auth initialization warning:', err);
+});
 
 
 

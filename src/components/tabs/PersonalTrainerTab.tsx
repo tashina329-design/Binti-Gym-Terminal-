@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dumbbell, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Dumbbell, ArrowDownLeft, ArrowUpRight, CheckCircle2 } from 'lucide-react';
 import { DashboardData } from '../../types';
 
 interface PersonalTrainerTabProps {
@@ -18,6 +18,7 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
   const [inAmount, setInAmount] = useState('');
   const [inPayment, setInPayment] = useState('Cash');
   const [inLoading, setInLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // PT OUT State
   const [outTrainer, setOutTrainer] = useState('');
@@ -31,6 +32,7 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
     if (!inTrainer.trim() || !inClient.trim() || !inAmount) return;
 
     setInLoading(true);
+    setSuccessMsg(null);
     try {
       await onRecordPTIn({
         trainerName: inTrainer,
@@ -39,10 +41,12 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
         amount: parseFloat(inAmount) || 0,
         paymentMethod: inPayment,
       });
+      setSuccessMsg(`PT Client Purchase recorded! ${inClient} (${inTrainer}) - $${parseFloat(inAmount || '0').toFixed(2)}`);
       setInTrainer('');
       setInClient('');
       setInSessions('');
       setInAmount('');
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to record PT sale: ' + (err.message || err));
     } finally {
@@ -55,6 +59,7 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
     if (!outTrainer.trim() || !outDesc.trim() || !outAmount) return;
 
     setOutLoading(true);
+    setSuccessMsg(null);
     try {
       await onRecordPTOut({
         trainerName: outTrainer,
@@ -62,9 +67,11 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
         amount: parseFloat(outAmount) || 0,
         paymentMethod: outPayment,
       });
+      setSuccessMsg(`Trainer Payout recorded! ${outTrainer} - $${parseFloat(outAmount || '0').toFixed(2)}`);
       setOutTrainer('');
       setOutDesc('');
       setOutAmount('');
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to record PT payout: ' + (err.message || err));
     } finally {
@@ -74,6 +81,12 @@ export const PersonalTrainerTab: React.FC<PersonalTrainerTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {successMsg && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-xl flex items-center gap-3 text-emerald-400 font-semibold text-sm animate-fade-in shadow-lg">
+          <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+          <span>{successMsg}</span>
+        </div>
+      )}
       <div>
         <h3 className="text-base font-semibold text-slate-200 mb-1 flex items-center gap-2">
           <Dumbbell className="w-5 h-5 text-emerald-400" /> Personal Trainer Management

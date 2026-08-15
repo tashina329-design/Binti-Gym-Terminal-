@@ -19,8 +19,20 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
   if (authInitPromise) return authInitPromise;
 
   authInitPromise = new Promise<User | null>((resolve) => {
+    let resolved = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn('Firebase auth state listener timed out, proceeding in offline/local mode');
+        resolve(null);
+      }
+    }, 4000);
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       unsub();
+      clearTimeout(fallbackTimer);
+      if (resolved) return;
+      resolved = true;
       if (user) {
         resolve(user);
       } else {

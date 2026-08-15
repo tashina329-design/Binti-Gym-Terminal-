@@ -27,6 +27,15 @@ import {
   dbStartShift,
   dbEndShift,
   dbResetDemoData,
+  broadcastLiveSync,
+  subscribeLiveSync,
+  fetchCloudStore,
+  loadClientStore,
+  saveClientStore,
+  saveClientStoreLocally,
+  getClientDashboardData,
+  SyncEventPayload,
+  GymDataStore,
 } from './firebaseSync';
 
 export {
@@ -40,7 +49,17 @@ export {
   getStoredBusinessName,
   getStoredBusinessPin,
   fetchStoresFromCloud,
+  broadcastLiveSync,
+  subscribeLiveSync,
+  fetchCloudStore,
+  loadClientStore,
+  saveClientStore,
+  saveClientStoreLocally,
+  getClientDashboardData,
 };
+
+export type { SyncEventPayload, GymDataStore };
+
 
 export function getBruneiFormattedDate(dateObj?: Date): string {
   const d = dateObj || new Date();

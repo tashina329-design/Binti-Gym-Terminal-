@@ -1,5 +1,21 @@
-import { doc, getDoc, getDocs, collection, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import {
+  doc,
+  getDoc,
+  getDocs,
+  collection,
+  onSnapshot,
+  setDoc,
+  addDoc,
+  deleteDoc,
+  updateDoc,
+  serverTimestamp,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import { db, ensureFirebaseAuth } from './firebase';
+import { DashboardData, Member, StaffShift, RegisteredStaff, CheckInResponse, PTDetail } from '../types';
+
+export const BRUNEI_TIMEZONE = 'Asia/Brunei';
 
 export interface SyncEventPayload {
   deviceId?: string;
@@ -12,60 +28,128 @@ export interface SyncEventPayload {
 }
 
 export interface GymDataStore {
-  members: any[];
+  members: Member[];
   attendance: any[];
   expenses: any[];
   sales: any[];
-  registeredStaff: any[];
-  activeShift: any | null;
+  registeredStaff: RegisteredStaff[];
+  activeShift: StaffShift | null;
   staffPin: string;
   availableStores?: string[];
 }
 
-export function extractStoreFromDoc(data: any): GymDataStore {
-  if (data?.store && Array.isArray(data.store.members)) {
-    const s = data.store;
-    return {
-      members: Array.isArray(s.members) ? s.members : [],
-      attendance: Array.isArray(s.attendance) ? s.attendance : [],
-      sales: Array.isArray(s.sales) ? s.sales : [],
-      expenses: Array.isArray(s.expenses) ? s.expenses : [],
-      registeredStaff: Array.isArray(s.registeredStaff) && s.registeredStaff.length > 0 ? s.registeredStaff : [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }],
-      activeShift: s.activeShift !== undefined ? s.activeShift : null,
-      staffPin: s.staffPin || '123456',
-      availableStores: Array.isArray(s.availableStores) && s.availableStores.length > 0 ? s.availableStores : ['Binti Gym'],
-    };
-  }
-
-  return {
-    members: Array.isArray(data?.members) ? data.members : [],
-    attendance: Array.isArray(data?.attendance) ? data.attendance : [],
-    sales: Array.isArray(data?.sales) ? data.sales : [],
-    expenses: Array.isArray(data?.expenses) ? data.expenses : [],
-    registeredStaff: Array.isArray(data?.registeredStaff) && data.registeredStaff.length > 0 ? data.registeredStaff : [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }],
-    activeShift: data?.activeShift !== undefined ? data.activeShift : null,
-    staffPin: data?.staffPin || data?.pin || '123456',
-    availableStores: Array.isArray(data?.availableStores) && data.availableStores.length > 0 ? data.availableStores : ['Binti Gym'],
-  };
+export function getBruneiTodayIsoDate(dateObj?: Date): string {
+  const d = dateObj || new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BRUNEI_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(d);
 }
 
-function getLocalGymStore(): GymDataStore {
+export function getBruneiFormattedTime(dateObj?: Date, includeSeconds = false): string {
+  const d = dateObj || new Date();
+  return d.toLocaleTimeString('en-US', {
+    timeZone: BRUNEI_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: includeSeconds ? '2-digit' : undefined,
+    hour12: true,
+  });
+}
+
+export function isSameDate(timestamp: any, targetDateStr: string): boolean {
+  if (!timestamp || !targetDateStr) return false;
+  const str = String(timestamp).trim();
+  if (str.startsWith(targetDateStr)) return true;
+
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) return false;
+
+  const bruneiDate = getBruneiTodayIsoDate(d);
+  if (bruneiDate === targetDateStr) return true;
+
   try {
-    const saved = localStorage.getItem('gym_data_store_v1');
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return {
-    members: [],
-    attendance: [],
-    expenses: [],
-    sales: [],
-    registeredStaff: [
-      { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }
-    ],
-    activeShift: null,
-    staffPin: '123456',
-    availableStores: ['Binti Gym']
-  };
+    const utcDate = d.toISOString().split('T')[0];
+    if (utcDate === targetDateStr) return true;
+  } catch (e) {}
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const localDate = `${year}-${month}-${day}`;
+  if (localDate === targetDateStr) return true;
+
+  return false;
+}
+
+export function getMemberStatus(endDateStr: string, referenceDateStr?: string): 'Active' | 'Expiring Soon' | 'Expired' {
+  if (!endDateStr) return 'Active';
+  try {
+    const refDate = referenceDateStr ? new Date(referenceDateStr + 'T00:00:00') : new Date();
+    if (isNaN(refDate.getTime())) return 'Active';
+    refDate.setHours(0, 0, 0, 0);
+
+    const expDate = new Date(endDateStr + 'T00:00:00');
+    if (isNaN(expDate.getTime())) return 'Active';
+    expDate.setHours(0, 0, 0, 0);
+
+    const diffTime = expDate.getTime() - refDate.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) return 'Expired';
+    if (diffDays <= 7) return 'Expiring Soon';
+    return 'Active';
+  } catch (e) {
+    return 'Active';
+  }
+}
+
+export function parsePTCustomer(customerStr: string): { clientName: string; trainer: string; sessions: string } {
+  try {
+    const cust = (customerStr || '').toString();
+    let clientName = '';
+    let trainer = '';
+    let sessions = '';
+
+    const trainerMatch = cust.match(/Trainer:\s*([^|,]+)/i);
+    const clientMatch = cust.match(/Client:\s*([^|,]+)/i);
+
+    if (trainerMatch) trainer = trainerMatch[1].trim();
+    if (clientMatch) clientName = clientMatch[1].trim();
+
+    const sessionsMatch = cust.match(/(\d+\s*session[s]?|session[s]?:?\s*[^|]+)/i);
+    if (sessionsMatch) sessions = sessionsMatch[0].trim();
+
+    if (!clientName || !trainer) {
+      if (cust.includes('|')) {
+        const parts = cust.split('|').map((p) => p.trim());
+        if (!clientName) clientName = parts[0] || '';
+        for (let i = 1; i < parts.length; i++) {
+          const p = parts[i];
+          if (/^trainer:/i.test(p)) trainer = p.split(':').slice(1).join(':').trim();
+          else if (/session/i.test(p)) sessions = p;
+          else if (!clientName) clientName = p;
+        }
+      } else {
+        const m = cust.match(/^(.*)\s*\(Trainer:\s*(.*)\)$/i);
+        if (m) {
+          clientName = clientName || m[1].trim();
+          trainer = trainer || m[2].trim();
+        } else {
+          const t = cust.match(/Trainer:\s*([^|,;]+)/i);
+          if (t) trainer = trainer || t[1].trim();
+          clientName = clientName || cust.replace(/Trainer:.*$/i, '').replace(/\|/g, '').trim();
+        }
+      }
+    }
+
+    return { clientName, trainer, sessions };
+  } catch (e) {
+    return { clientName: customerStr || '', trainer: '', sessions: '' };
+  }
 }
 
 let cachedDeviceId: string | null = null;
@@ -85,12 +169,6 @@ export function getDeviceId(): string {
     return cachedDeviceId;
   }
 }
-
-// BroadcastChannel for instant same-browser cross-tab sync
-const syncChannel =
-  typeof window !== 'undefined' && 'BroadcastChannel' in window
-    ? new BroadcastChannel('binti_gym_live_sync_channel')
-    : null;
 
 export function getStoredBusinessName(): string {
   try {
@@ -114,9 +192,14 @@ export function normalizeStoreKey(businessName?: string): string {
   return clean || 'binti_gym';
 }
 
-function getStoreDocRef(businessName?: string) {
+function getBusinessDocRef(businessName?: string) {
   const key = normalizeStoreKey(businessName);
-  return doc(db, 'gym_stores', key);
+  return doc(db, 'businesses', key);
+}
+
+function getBusinessCollectionRef(businessName: string, subcollection: string) {
+  const key = normalizeStoreKey(businessName);
+  return collection(db, 'businesses', key, subcollection);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -127,7 +210,311 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
+// Compute live dashboard metrics from subcollection records
+export function computeDashboardFromCollections(
+  targetDateStr: string,
+  members: Member[],
+  attendance: any[],
+  sales: any[],
+  expenses: any[],
+  staffList: RegisteredStaff[] = [],
+  activeShift: StaffShift | null = null,
+  staffPin: string = '123456',
+  availableStores: string[] = ['Binti Gym']
+): DashboardData {
+  let totalRevenue = 0;
+  let totalExpenses = 0;
+  let posSalesTotal = 0;
+  let classSalesTotal = 0;
+  let ptSalesTotal = 0;
+  let ptPayoutTotal = 0;
+  let walkInSalesTotal = 0;
+  let membershipSalesTotal = 0;
+  let checkinCount = 0;
+  let expiringCount = 0;
+
+  let cashIn = 0;
+  let cashOut = 0;
+  let baiduriIn = 0;
+  let bibdIn = 0;
+
+  const todaySales: any[] = [];
+  const todayExpenses: any[] = [];
+  const todayAttendance: any[] = [];
+  const membersList: Member[] = [];
+  const ptDetails: PTDetail[] = [];
+
+  for (const m of members) {
+    const status = getMemberStatus(m.endDate, targetDateStr);
+    if (status === 'Expiring Soon' || status === 'Expired') {
+      expiringCount++;
+    }
+    membersList.push({
+      memberId: m.memberId,
+      name: m.name,
+      phone: m.phone,
+      plan: m.plan,
+      startDate: m.startDate,
+      endDate: m.endDate,
+      status,
+    });
+  }
+
+  for (const s of sales) {
+    if (isSameDate(s.timestamp, targetDateStr)) {
+      const d = new Date(s.timestamp);
+      const category = s.category || '';
+      const customer = s.customer || '';
+      const paymentRaw = s.paymentMethod || s.payment || '';
+      const payment = paymentRaw.trim().toLowerCase();
+      const amount = Number(s.amount) || 0;
+
+      totalRevenue += amount;
+      if (/pos|sauna/i.test(category)) posSalesTotal += amount;
+      else if (/class/i.test(category)) classSalesTotal += amount;
+      else if (/pt|personal/i.test(category)) ptSalesTotal += amount;
+      else if (/walk-?in/i.test(category)) walkInSalesTotal += amount;
+      else if (/membership|renew/i.test(category)) membershipSalesTotal += amount;
+
+      if (payment.includes('cash')) cashIn += amount;
+      else if (payment.includes('baiduri')) baiduriIn += amount;
+      else if (payment.includes('bibd')) bibdIn += amount;
+
+      todaySales.push({
+        id: s.id,
+        timestamp: s.timestamp,
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
+        category,
+        customer,
+        payment: paymentRaw,
+        amount,
+        staff: s.staff || 'Duty Staff',
+      });
+
+      if (/pt|personal/i.test(category)) {
+        const parsed = parsePTCustomer(customer);
+        ptDetails.push({
+          time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
+          trainer: parsed.trainer || s.trainerName || '',
+          client: parsed.clientName || s.clientName || '',
+          sessions: parsed.sessions || s.sessions || '',
+          amount,
+        });
+      }
+    }
+  }
+
+  for (const e of expenses) {
+    if (isSameDate(e.timestamp, targetDateStr)) {
+      const d = new Date(e.timestamp);
+      const category = e.category || '';
+      const description = e.description || '';
+      const paymentRaw = e.paymentMethod || e.payment || '';
+      const payment = paymentRaw.trim().toLowerCase();
+      const amount = Number(e.amount) || 0;
+
+      totalExpenses += amount;
+      if (/pt payout/i.test(category)) ptPayoutTotal += amount;
+      if (payment.includes('cash')) cashOut += amount;
+
+      todayExpenses.push({
+        id: e.id,
+        timestamp: e.timestamp,
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
+        category,
+        description,
+        payment: paymentRaw,
+        amount,
+        staff: e.staff || 'Duty Staff',
+      });
+    }
+  }
+
+  for (const a of attendance) {
+    if (isSameDate(a.timestamp, targetDateStr)) {
+      const d = new Date(a.timestamp);
+      checkinCount++;
+      todayAttendance.push({
+        id: a.id,
+        timestamp: a.timestamp,
+        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
+        name: a.name || 'Guest',
+        phone: a.phone || '-',
+        plan: a.plan || '-',
+        status: a.status || 'Active',
+      });
+    }
+  }
+
+  const storeData: GymDataStore = {
+    members: membersList,
+    attendance,
+    sales,
+    expenses,
+    registeredStaff: staffList.length > 0 ? staffList : [
+      { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }
+    ],
+    activeShift,
+    staffPin,
+    availableStores,
+  };
+
+  return {
+    totalRevenue,
+    totalExpenses,
+    netIncome: totalRevenue - totalExpenses,
+    posSalesTotal,
+    classSalesTotal,
+    ptSalesTotal,
+    ptPayoutTotal,
+    walkInSalesTotal,
+    membershipSalesTotal,
+    checkinCount,
+    expiringCount,
+    todayAttendance,
+    todaySales,
+    todayExpenses,
+    members: membersList,
+    cashIn,
+    cashOut,
+    baiduriIn,
+    bibdIn,
+    ptDetails,
+    viewDate: targetDateStr,
+    store: storeData,
+  };
+}
+
+// Initial seed data populator for fresh stores in Firestore
+export async function seedInitialBusinessData(businessName: string, pin: string) {
+  const bizRef = getBusinessDocRef(businessName);
+  const cleanName = businessName.trim();
+  const dToday = new Date();
+
+  const d30DaysAgo = new Date(dToday);
+  d30DaysAgo.setDate(dToday.getDate() - 30);
+  const start30Ago = getBruneiTodayIsoDate(d30DaysAgo);
+
+  const d5DaysLater = new Date(dToday);
+  d5DaysLater.setDate(dToday.getDate() + 5);
+  const end5Later = getBruneiTodayIsoDate(d5DaysLater);
+
+  const d30DaysLater = new Date(dToday);
+  d30DaysLater.setDate(dToday.getDate() + 30);
+  const end30Later = getBruneiTodayIsoDate(d30DaysLater);
+
+  const d10DaysAgo = new Date(dToday);
+  d10DaysAgo.setDate(dToday.getDate() - 10);
+  const end10Ago = getBruneiTodayIsoDate(d10DaysAgo);
+
+  const deviceId = getDeviceId();
+
+  // 1. Create root business doc
+  await setDoc(bizRef, {
+    name: cleanName,
+    pin: pin.trim(),
+    staffPin: '123456',
+    activeShift: null,
+    availableStores: [cleanName],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    deviceId,
+  }, { merge: true });
+
+  // 2. Seed members
+  const initialMembers = [
+    { memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
+    { memberId: 'MEM-204891', name: 'Siti Nurhaliza', phone: '8823456', plan: 'Student Monthly', startDate: start30Ago, endDate: end5Later, status: 'Expiring Soon' },
+    { memberId: 'MEM-309123', name: 'Markus Vance', phone: '8934567', plan: 'Standard Monthly', startDate: '2026-05-01', endDate: end10Ago, status: 'Expired' },
+    { memberId: 'MEM-401928', name: 'Jessica Tan', phone: '8765432', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' }
+  ];
+
+  const membersColl = getBusinessCollectionRef(cleanName, 'members');
+  for (const m of initialMembers) {
+    const docRef = doc(membersColl, m.memberId);
+    await setDoc(docRef, {
+      ...m,
+      deviceId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
+  // 3. Seed attendance
+  const attColl = getBusinessCollectionRef(cleanName, 'attendance');
+  const initialAttendance = [
+    { timestamp: new Date(Date.now() - 300000).toISOString(), memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', status: 'Active' },
+    { timestamp: new Date(Date.now() - 200000).toISOString(), memberId: 'GUEST', name: 'Michael Lee', phone: '-', plan: 'Walk-In Pass', status: 'Active' }
+  ];
+  for (const a of initialAttendance) {
+    await addDoc(attColl, {
+      ...a,
+      deviceId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  // 4. Seed sales
+  const salesColl = getBusinessCollectionRef(cleanName, 'sales');
+  const initialSales = [
+    { timestamp: new Date(Date.now() - 14400000).toISOString(), category: 'POS', customer: 'Energy Bar x2', paymentMethod: 'Cash', amount: 6, staff: 'System Admin' },
+    { timestamp: new Date(Date.now() - 10800000).toISOString(), category: 'Walk-In', customer: 'Michael Lee (Walk-In)', paymentMethod: 'BIBD QuickPay', amount: 10, staff: 'System Admin' },
+    { timestamp: new Date(Date.now() - 3600000).toISOString(), category: 'Personal Training', customer: 'Client: Ahmad Daniel | Trainer: Coach Alex | 5 Sessions', paymentMethod: 'Baiduri Card', amount: 150, staff: 'System Admin' }
+  ];
+  for (const s of initialSales) {
+    await addDoc(salesColl, {
+      ...s,
+      deviceId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  // 5. Seed expenses
+  const expColl = getBusinessCollectionRef(cleanName, 'expenses');
+  const initialExpenses = [
+    { timestamp: new Date(Date.now() - 7200000).toISOString(), category: 'Utilities', description: 'Water & Filter Restock', paymentMethod: 'Cash', amount: 45, staff: 'System Admin' }
+  ];
+  for (const e of initialExpenses) {
+    await addDoc(expColl, {
+      ...e,
+      deviceId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  // 6. Seed staff
+  const staffColl = getBusinessCollectionRef(cleanName, 'staff');
+  await setDoc(doc(staffColl, 'STF-101'), {
+    id: 'STF-101',
+    name: 'System Admin',
+    phone: '8000000',
+    pin: '123456',
+    registeredAt: new Date().toISOString(),
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  // 7. Update registry
+  try {
+    const regDoc = doc(db, 'gym', 'registry');
+    const regSnap = await getDoc(regDoc);
+    const existingStores: string[] =
+      regSnap.exists() && Array.isArray(regSnap.data()?.stores)
+        ? regSnap.data().stores
+        : ['Binti Gym'];
+    if (!existingStores.includes(cleanName)) {
+      existingStores.push(cleanName);
+      await setDoc(regDoc, { stores: existingStores, updatedAt: Date.now() }, { merge: true });
+    }
+  } catch {}
+}
+
 export async function fetchStoresFromCloud(): Promise<string[]> {
+  await ensureFirebaseAuth();
   const storesSet = new Set<string>(['Binti Gym']);
   try {
     const regDoc = doc(db, 'gym', 'registry');
@@ -143,8 +530,8 @@ export async function fetchStoresFromCloud(): Promise<string[]> {
   } catch {}
 
   try {
-    const storesColl = collection(db, 'gym_stores');
-    const snapColl = await withTimeout(getDocs(storesColl), 4000, null as any);
+    const bizColl = collection(db, 'businesses');
+    const snapColl = await withTimeout(getDocs(bizColl), 4000, null as any);
     if (snapColl && snapColl.docs) {
       snapColl.docs.forEach((d: any) => {
         const dData = d.data();
@@ -162,19 +549,20 @@ export async function authenticateCloudBusinessStore(
   name: string,
   pin: string,
   mode: 'login' | 'register'
-): Promise<{ success: boolean; message?: string; store?: GymDataStore; businessName?: string; pin?: string }> {
+): Promise<{ success: boolean; message?: string; businessName?: string; pin?: string }> {
+  await ensureFirebaseAuth();
   const cleanName = name.trim();
   const cleanPin = pin.trim();
-  const docRef = getStoreDocRef(cleanName);
+  const docRef = getBusinessDocRef(cleanName);
 
   try {
     let snapshot = await withTimeout(getDoc(docRef), 8000, null as any);
 
-    // If direct key doesn't hit, search case-insensitively across gym_stores
+    // If direct key doesn't hit, check all docs in 'businesses' collection
     if (!snapshot || !snapshot.exists || !snapshot.exists()) {
       try {
-        const storesColl = collection(db, 'gym_stores');
-        const snapColl = await withTimeout(getDocs(storesColl), 5000, null as any);
+        const bizColl = collection(db, 'businesses');
+        const snapColl = await withTimeout(getDocs(bizColl), 5000, null as any);
         if (snapColl && snapColl.docs) {
           const matchDoc = snapColl.docs.find((d: any) => {
             const dName = (d.data()?.name || '').trim().toLowerCase();
@@ -190,107 +578,37 @@ export async function authenticateCloudBusinessStore(
     if (mode === 'login') {
       if (snapshot && snapshot.exists && snapshot.exists()) {
         const data = snapshot.data();
-        const storedPin = String(data.pin || data.store?.staffPin || '1234').trim();
+        const storedPin = String(data.pin || '1234').trim();
         if (storedPin !== cleanPin) {
           return {
             success: false,
             message: `Incorrect 4-digit PIN code for "${data.name || cleanName}". Please check the PIN.`,
           };
         }
-        const store = extractStoreFromDoc(data);
-        try {
-          localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
-          if (store.registeredStaff) {
-            localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
-          }
-          if (store.staffPin) {
-            localStorage.setItem('gym_staff_pin', store.staffPin);
-          }
-          if (store.availableStores) {
-            localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
-          }
-          if (store.activeShift !== undefined) {
-            if (store.activeShift) {
-              localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
-            } else {
-              localStorage.removeItem('gym_active_shift');
-            }
-          }
-        } catch {}
-
         return {
           success: true,
           businessName: data.name || cleanName,
           pin: cleanPin,
-          store,
         };
       } else {
-        // Not found in cloud yet: auto-register and sync this store to Cloud Firestore so all other devices can connect!
-        const initialStore: GymDataStore = getLocalGymStore();
-        if (!initialStore.availableStores) initialStore.availableStores = [];
-        if (!initialStore.availableStores.includes(cleanName)) {
-          initialStore.availableStores.push(cleanName);
-        }
-
-        const payload = {
-          name: cleanName,
-          pin: cleanPin,
-          updatedAt: Date.now(),
-          deviceId: getDeviceId(),
-          store: initialStore,
-          members: initialStore.members || [],
-          attendance: initialStore.attendance || [],
-          sales: initialStore.sales || [],
-          expenses: initialStore.expenses || [],
-          registeredStaff: initialStore.registeredStaff || [],
-          activeShift: initialStore.activeShift || null,
-          staffPin: cleanPin,
-          availableStores: initialStore.availableStores || [cleanName],
-        };
-
-        await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
-
-        try {
-          const regDoc = doc(db, 'gym', 'registry');
-          const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
-          const existingStores: string[] =
-            regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
-              ? regSnap.data().stores
-              : ['Binti Gym'];
-          if (!existingStores.includes(cleanName)) {
-            existingStores.push(cleanName);
-            await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
-          }
-        } catch {}
-
-        try {
-          localStorage.setItem('gym_data_store_v1', JSON.stringify(initialStore));
-          localStorage.setItem('current_business_name', cleanName);
-          localStorage.setItem('current_business_pin', cleanPin);
-        } catch {}
-
+        // Business doc not found in Firestore: initialize it directly in Firestore
+        await seedInitialBusinessData(cleanName, cleanPin);
         return {
           success: true,
           businessName: cleanName,
           pin: cleanPin,
-          store: initialStore,
         };
       }
     } else {
       // REGISTER MODE
       if (snapshot && snapshot.exists && snapshot.exists()) {
         const data = snapshot.data();
-        const storedPin = String(data.pin || data.store?.staffPin || '1234').trim();
+        const storedPin = String(data.pin || '1234').trim();
         if (storedPin === cleanPin) {
-          const store = extractStoreFromDoc(data);
-          try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
-          } catch {}
           return {
             success: true,
             businessName: data.name || cleanName,
             pin: cleanPin,
-            store,
           };
         }
         return {
@@ -299,418 +617,812 @@ export async function authenticateCloudBusinessStore(
         };
       }
 
-      let storeToRegister: GymDataStore;
-      try {
-        const raw = localStorage.getItem('gym_data_store_v1');
-        storeToRegister = raw
-          ? JSON.parse(raw)
-          : {
-              members: [],
-              attendance: [],
-              expenses: [],
-              sales: [],
-              registeredStaff: [],
-              activeShift: null,
-              staffPin: cleanPin,
-            };
-      } catch {
-        storeToRegister = {
-          members: [],
-          attendance: [],
-          expenses: [],
-          sales: [],
-          registeredStaff: [],
-          activeShift: null,
-          staffPin: cleanPin,
-        };
-      }
-
-      storeToRegister.staffPin = cleanPin;
-
-      const payload = {
-        name: cleanName,
-        pin: cleanPin,
-        updatedAt: Date.now(),
-        deviceId: getDeviceId(),
-        store: storeToRegister,
-        members: storeToRegister.members || [],
-        attendance: storeToRegister.attendance || [],
-        sales: storeToRegister.sales || [],
-        expenses: storeToRegister.expenses || [],
-        registeredStaff: storeToRegister.registeredStaff || [],
-        activeShift: storeToRegister.activeShift || null,
-        staffPin: cleanPin,
-        availableStores: [cleanName],
-      };
-
-      await withTimeout(setDoc(docRef, payload, { merge: true }), 8000, null);
-
-      try {
-        const regDoc = doc(db, 'gym', 'registry');
-        const regSnap = await withTimeout(getDoc(regDoc), 4000, null as any);
-        const existingStores: string[] =
-          regSnap && regSnap.exists && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
-            ? regSnap.data().stores
-            : ['Binti Gym'];
-        if (!existingStores.includes(cleanName)) {
-          existingStores.push(cleanName);
-          await withTimeout(setDoc(regDoc, { stores: existingStores }, { merge: true }), 4000, null);
-        }
-      } catch {}
-
-      try {
-        localStorage.setItem('gym_data_store_v1', JSON.stringify(storeToRegister));
-        localStorage.setItem('current_business_name', cleanName);
-        localStorage.setItem('current_business_pin', cleanPin);
-      } catch {}
-
+      // Fresh registration
+      await seedInitialBusinessData(cleanName, cleanPin);
       return {
         success: true,
         businessName: cleanName,
         pin: cleanPin,
-        store: storeToRegister,
       };
     }
   } catch (err: any) {
-    console.warn('Cloud store auth fallback:', err);
+    console.error('Firestore business authentication error:', err);
     return {
-      success: true,
-      businessName: cleanName,
-      pin: cleanPin,
+      success: false,
+      message: err.message || 'Database connection error. Please check your internet connection.',
     };
   }
 }
 
-export async function syncStoreToBackend(store: GymDataStore, businessName?: string): Promise<GymDataStore | null> {
-  try {
-    const biz = businessName || getStoredBusinessName();
-    const pin = getStoredBusinessPin();
-    const res = await fetch('/api/sync', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Business-Name': biz,
-        'X-Business-Pin': pin,
-      },
-      body: JSON.stringify({ store }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.store) {
-        return data.store as GymDataStore;
-      }
-    }
-  } catch {}
-  return null;
-}
-
-export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
-  try {
-    const activeBiz = (businessName || getStoredBusinessName()).trim();
-    const storeDocRef = getStoreDocRef(activeBiz);
-    let snapshot = await withTimeout(getDoc(storeDocRef), 8000, null as any);
-
-    // If direct lookup fails, search across gym_stores
-    if (!snapshot || !snapshot.exists || !snapshot.exists()) {
-      try {
-        const storesColl = collection(db, 'gym_stores');
-        const snapColl = await withTimeout(getDocs(storesColl), 4000, null as any);
-        if (snapColl && snapColl.docs) {
-          const matchDoc = snapColl.docs.find((d: any) => {
-            const dName = (d.data()?.name || '').trim().toLowerCase();
-            return dName === activeBiz.toLowerCase() || d.id === normalizeStoreKey(activeBiz);
-          });
-          if (matchDoc) {
-            snapshot = matchDoc;
-          }
-        }
-      } catch {}
-    }
-
-    if (snapshot && snapshot.exists && snapshot.exists()) {
-      const data = snapshot.data();
-      const store = extractStoreFromDoc(data);
-      if (store) {
-        try {
-          localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
-          if (store.registeredStaff) {
-            localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
-          }
-          if (store.staffPin) {
-            localStorage.setItem('gym_staff_pin', store.staffPin);
-          }
-          if (store.availableStores) {
-            localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
-          }
-          if (store.activeShift !== undefined) {
-            if (store.activeShift) {
-              localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
-            } else {
-              localStorage.removeItem('gym_active_shift');
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to sync cloud store to localStorage:', e);
-        }
-
-        syncStoreToBackend(store, activeBiz);
-        return store;
-      }
-    }
-  } catch (err) {
-    console.warn('Error fetching cloud store:', err);
-  }
-  return null;
-}
-
-export function subscribeLiveSync(
-  onUpdate: (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => void,
+// Subscribe to real-time updates for all subcollections of a business
+export function subscribeFirestoreBusiness(
+  businessName: string,
+  onDataUpdate: (data: DashboardData, event?: SyncEventPayload, isRemote?: boolean) => void,
   onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void,
-  businessName?: string
+  viewDate?: string
 ) {
-  let unsubFirestore = () => {};
-  let subscriberLastTimestamp = 0;
+  let isUnsubscribed = false;
+  const unsubs: Array<() => void> = [];
+  const cleanName = (businessName || getStoredBusinessName()).trim();
   const myDeviceId = getDeviceId();
-  const activeBiz = (businessName || getStoredBusinessName()).trim();
 
-  const updateNetworkStatus = () => {
-    if (typeof window !== 'undefined' && !window.navigator.onLine) {
-      if (onStatusChange) onStatusChange('offline');
-    }
+  let liveMembers: Member[] = [];
+  let liveAttendance: any[] = [];
+  let liveSales: any[] = [];
+  let liveExpenses: any[] = [];
+  let liveStaff: RegisteredStaff[] = [];
+  let liveActiveShift: StaffShift | null = null;
+  let liveStaffPin: string = '123456';
+  let liveAvailableStores: string[] = [cleanName];
+  let lastHandledEventTime = 0;
+
+  const activeDate = viewDate || getBruneiTodayIsoDate();
+
+  const emitDashboard = (eventPayload?: SyncEventPayload, isRemote = false) => {
+    if (isUnsubscribed) return;
+    const dashboard = computeDashboardFromCollections(
+      activeDate,
+      liveMembers,
+      liveAttendance,
+      liveSales,
+      liveExpenses,
+      liveStaff,
+      liveActiveShift,
+      liveStaffPin,
+      liveAvailableStores
+    );
+    onDataUpdate(dashboard, eventPayload, isRemote);
   };
 
-  updateNetworkStatus();
-
-  const handleOnline = () => {
-    if (onStatusChange) onStatusChange('connected');
-    try {
-      const pending = localStorage.getItem('gym_pending_offline_sync');
-      if (pending === 'true') {
-        localStorage.removeItem('gym_pending_offline_sync');
-        broadcastLiveSync({
-          type: 'reset',
-          title: '📶 Back Online',
-          message: 'Offline changes successfully synchronized with cloud database.',
-        }, undefined, activeBiz);
-      }
-    } catch {}
-  };
-
-  const handleOffline = () => {
-    if (onStatusChange) onStatusChange('offline');
-  };
+  const handleOnline = () => onStatusChange?.('connected');
+  const handleOffline = () => onStatusChange?.('offline');
 
   if (typeof window !== 'undefined') {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    if (!window.navigator.onLine) onStatusChange?.('offline');
   }
 
-  // 1. Listen to Firestore real-time doc updates across all devices
-  try {
-    const storeDocRef = getStoreDocRef(activeBiz);
-    unsubFirestore = onSnapshot(
-      storeDocRef,
-      async (snapshot) => {
-        const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
-        if (onStatusChange) onStatusChange(isOnline ? 'connected' : 'offline');
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const updatedAt = Number(data.updatedAt) || 0;
-          const isRemote = Boolean(data.deviceId && data.deviceId !== myDeviceId);
-          const store = extractStoreFromDoc(data);
+  ensureFirebaseAuth().then(() => {
+    if (isUnsubscribed) return;
 
-          // Accept remote changes or newer timestamps
-          if (isRemote || updatedAt > subscriberLastTimestamp) {
-            subscriberLastTimestamp = Math.max(subscriberLastTimestamp, updatedAt);
-
-            if (store) {
-              try {
-                localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
-                if (store.registeredStaff) {
-                  localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
-                }
-                if (store.staffPin) {
-                  localStorage.setItem('gym_staff_pin', store.staffPin);
-                }
-                if (store.availableStores) {
-                  localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
-                }
-                if (store.activeShift !== undefined) {
-                  if (store.activeShift) {
-                    localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
-                  } else {
-                    localStorage.removeItem('gym_active_shift');
-                  }
-                }
-              } catch (e) {
-                console.warn('Error updating local cache from remote cloud store:', e);
-              }
-              await syncStoreToBackend(store, activeBiz);
+    try {
+      // 1. Business Root Doc listener (activeShift, settings, broadcast event)
+      const bizRef = getBusinessDocRef(cleanName);
+      const unsubBiz = onSnapshot(
+        bizRef,
+        (snap) => {
+          onStatusChange?.('connected');
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data.activeShift !== undefined) {
+              liveActiveShift = data.activeShift;
+            }
+            if (data.staffPin) {
+              liveStaffPin = data.staffPin;
+            }
+            if (Array.isArray(data.availableStores)) {
+              liveAvailableStores = data.availableStores;
             }
 
-            onUpdate(data.lastEvent || undefined, isRemote, store);
+            if (data.lastEvent && typeof data.lastEvent === 'object') {
+              const evt = data.lastEvent;
+              const evtTime = Number(evt.timestampMs || evt.updatedAt || 0);
+              const isRemote = Boolean(evt.deviceId && evt.deviceId !== myDeviceId);
+              if (evtTime > lastHandledEventTime) {
+                lastHandledEventTime = evtTime;
+                emitDashboard(evt, isRemote);
+                return;
+              }
+            }
           }
+          emitDashboard();
+        },
+        (err) => {
+          console.warn('Firestore business doc listener status:', err);
+          onStatusChange?.('reconnecting');
         }
-      },
-      (error) => {
-        console.warn('Firestore live sync listener status:', error);
-        const isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
-        if (onStatusChange) onStatusChange(isOnline ? 'reconnecting' : 'offline');
-      }
-    );
-  } catch (err) {
-    console.warn('Firestore live sync subscribe error:', err);
-    if (onStatusChange) onStatusChange('offline');
-  }
+      );
+      unsubs.push(unsubBiz);
 
-  // 2. Periodic cloud sync poll to guarantee background updates across networks
-  const pollInterval = setInterval(async () => {
-    try {
-      const storeDocRef = getStoreDocRef(activeBiz);
-      const snap = await getDoc(storeDocRef);
-      if (snap && snap.exists()) {
-        const data = snap.data();
-        const updatedAt = Number(data.updatedAt) || 0;
-        const isRemote = Boolean(data.deviceId && data.deviceId !== myDeviceId);
-        if (updatedAt > subscriberLastTimestamp && isRemote) {
-          subscriberLastTimestamp = updatedAt;
-          const store = extractStoreFromDoc(data);
-          onUpdate(data.lastEvent || undefined, isRemote, store);
-        }
-      }
-    } catch {}
-  }, 10000);
+      // 2. Members subcollection listener
+      const membersRef = getBusinessCollectionRef(cleanName, 'members');
+      const unsubMembers = onSnapshot(
+        membersRef,
+        (snap) => {
+          liveMembers = snap.docs.map((d) => {
+            const data = d.data();
+            return {
+              memberId: data.memberId || d.id,
+              name: data.name || '',
+              phone: data.phone || '',
+              plan: data.plan || '',
+              startDate: data.startDate || '',
+              endDate: data.endDate || '',
+              status: getMemberStatus(data.endDate, activeDate),
+            };
+          });
+          emitDashboard();
+        },
+        (err) => console.warn('Members listener error:', err)
+      );
+      unsubs.push(unsubMembers);
 
-  // 3. Listen to BroadcastChannel for local cross-tab instant sync
-  const handleBroadcast = (event: MessageEvent) => {
-    if (event.data) {
-      const isRemote = event.data.deviceId !== myDeviceId;
-      if (isRemote || event.data.updatedAt > subscriberLastTimestamp) {
-        if (event.data.updatedAt > subscriberLastTimestamp) {
-          subscriberLastTimestamp = event.data.updatedAt;
-        }
-        const store = extractStoreFromDoc(event.data);
-        if (store) {
-          try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
-          } catch {}
-        }
-        onUpdate(event.data.lastEvent || undefined, isRemote, store);
-      }
+      // 3. Attendance subcollection listener
+      const attRef = getBusinessCollectionRef(cleanName, 'attendance');
+      const unsubAtt = onSnapshot(
+        attRef,
+        (snap) => {
+          liveAttendance = snap.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+          }));
+          emitDashboard();
+        },
+        (err) => console.warn('Attendance listener error:', err)
+      );
+      unsubs.push(unsubAtt);
+
+      // 4. Sales subcollection listener
+      const salesRef = getBusinessCollectionRef(cleanName, 'sales');
+      const unsubSales = onSnapshot(
+        salesRef,
+        (snap) => {
+          liveSales = snap.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+          }));
+          emitDashboard();
+        },
+        (err) => console.warn('Sales listener error:', err)
+      );
+      unsubs.push(unsubSales);
+
+      // 5. Expenses subcollection listener
+      const expRef = getBusinessCollectionRef(cleanName, 'expenses');
+      const unsubExp = onSnapshot(
+        expRef,
+        (snap) => {
+          liveExpenses = snap.docs.map((d) => ({
+            id: d.id,
+            ...d.data(),
+          }));
+          emitDashboard();
+        },
+        (err) => console.warn('Expenses listener error:', err)
+      );
+      unsubs.push(unsubExp);
+
+      // 6. Staff subcollection listener
+      const staffRef = getBusinessCollectionRef(cleanName, 'staff');
+      const unsubStaff = onSnapshot(
+        staffRef,
+        (snap) => {
+          liveStaff = snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as any),
+          }));
+          emitDashboard();
+        },
+        (err) => console.warn('Staff listener error:', err)
+      );
+      unsubs.push(unsubStaff);
+    } catch (err) {
+      console.warn('Error setting up Firestore subscriptions:', err);
+      onStatusChange?.('offline');
     }
-  };
-
-  if (syncChannel) {
-    syncChannel.addEventListener('message', handleBroadcast);
-  }
-
-  // 4. Storage event fallback for cross-tab sync
-  const handleStorage = (e: StorageEvent) => {
-    if (e.key === 'gym_live_sync_trigger') {
-      try {
-        const parsed = JSON.parse(e.newValue || '{}');
-        const isRemote = parsed.deviceId !== myDeviceId;
-        if (isRemote || parsed.updatedAt > subscriberLastTimestamp) {
-          if (parsed.updatedAt > subscriberLastTimestamp) {
-            subscriberLastTimestamp = parsed.updatedAt;
-          }
-          const store = extractStoreFromDoc(parsed);
-          onUpdate(parsed.lastEvent || undefined, isRemote, store);
-        }
-      } catch {}
-    }
-  };
-  if (typeof window !== 'undefined') {
-    window.addEventListener('storage', handleStorage);
-  }
+  });
 
   return () => {
-    unsubFirestore();
-    clearInterval(pollInterval);
-    if (syncChannel) {
-      syncChannel.removeEventListener('message', handleBroadcast);
-    }
+    isUnsubscribed = true;
+    unsubs.forEach((fn) => fn());
     if (typeof window !== 'undefined') {
-      window.removeEventListener('storage', handleStorage);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     }
   };
 }
 
-export async function broadcastLiveSync(eventData?: SyncEventPayload, storeData?: GymDataStore, businessName?: string) {
-  const timestamp = Date.now();
-  const myDeviceId = getDeviceId();
-  const activeBiz = (businessName || getStoredBusinessName()).trim();
-  const activePin = getStoredBusinessPin();
+// -------------------------------------------------------------
+// Direct Firestore Mutations (Single Source of Truth)
+// -------------------------------------------------------------
 
-  let storeToSync = storeData;
-  if (!storeToSync && typeof localStorage !== 'undefined') {
-    try {
-      const saved = localStorage.getItem('gym_data_store_v1');
-      if (saved) storeToSync = JSON.parse(saved);
-    } catch {}
-  }
-
-  const payload = {
-    name: activeBiz,
-    pin: activePin,
-    updatedAt: timestamp,
-    deviceId: myDeviceId,
-    lastEvent: eventData ? { ...eventData, deviceId: myDeviceId } : null,
-    store: storeToSync || null,
-    members: storeToSync?.members || [],
-    attendance: storeToSync?.attendance || [],
-    sales: storeToSync?.sales || [],
-    expenses: storeToSync?.expenses || [],
-    registeredStaff: storeToSync?.registeredStaff || [],
-    activeShift: storeToSync?.activeShift !== undefined ? storeToSync.activeShift : null,
-    staffPin: storeToSync?.staffPin || activePin,
-    availableStores: storeToSync?.availableStores || [activeBiz],
-  };
-
-  // 1. Same-browser cross-tab sync
-  if (syncChannel) {
-    try {
-      syncChannel.postMessage(payload);
-    } catch (e) {}
-  }
-
+export async function dbBroadcastEvent(businessName: string, event: SyncEventPayload) {
+  await ensureFirebaseAuth();
   try {
-    localStorage.setItem('gym_live_sync_trigger', JSON.stringify(payload));
-  } catch {}
-
-  // 2. Sync to local backend server
-  if (storeToSync) {
-    syncStoreToBackend(storeToSync, activeBiz);
-  }
-
-  // 3. Write directly to Firestore cloud database for instant cross-device sync
-  try {
-    const storeDocRef = getStoreDocRef(activeBiz);
-    await setDoc(storeDocRef, payload, { merge: true });
-
-    // Update global registry of stores
-    try {
-      const regDoc = doc(db, 'gym', 'registry');
-      const regSnap = await getDoc(regDoc);
-      const existingStores: string[] =
-        regSnap && regSnap.exists() && Array.isArray(regSnap.data()?.stores)
-          ? regSnap.data().stores
-          : ['Binti Gym'];
-      if (!existingStores.includes(activeBiz)) {
-        existingStores.push(activeBiz);
-        await setDoc(regDoc, { stores: existingStores, updatedAt: timestamp }, { merge: true });
-      }
-    } catch (regErr) {
-      console.warn('Registry update notice:', regErr);
-    }
+    const bizRef = getBusinessDocRef(businessName);
+    const myDeviceId = getDeviceId();
+    const eventPayload = {
+      ...event,
+      deviceId: myDeviceId,
+      timestampMs: Date.now(),
+    };
+    await updateDoc(bizRef, {
+      lastEvent: eventPayload,
+      updatedAt: serverTimestamp(),
+    });
   } catch (err) {
-    console.warn('Firestore cloud broadcast error (queued locally by SDK):', err);
-    if (typeof window !== 'undefined' && !window.navigator.onLine) {
-      try {
-        localStorage.setItem('gym_pending_offline_sync', 'true');
-      } catch {}
+    console.warn('Firestore event broadcast notice:', err);
+  }
+}
+
+export async function dbCheckInPhone(businessName: string, phone: string): Promise<CheckInResponse> {
+  await ensureFirebaseAuth();
+  const cleanPhone = phone.trim();
+  const membersRef = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersRef);
+  const matched = snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Member) }))
+    .filter((m) => m.phone.replace(/\D/g, '').includes(cleanPhone.replace(/\D/g, '')));
+
+  if (matched.length === 0) {
+    return { success: false, notFound: true, message: `No active member found with phone: ${phone}` };
+  }
+
+  if (matched.length > 1) {
+    return {
+      success: true,
+      multiple: true,
+      members: matched.map((m) => ({
+        memberId: m.memberId,
+        fullName: m.name,
+        phone: m.phone,
+        plan: m.plan,
+        planType: m.plan,
+        status: getMemberStatus(m.endDate),
+        expirationDate: m.endDate,
+      })),
+    };
+  }
+
+  const member = matched[0];
+  const attColl = getBusinessCollectionRef(businessName, 'attendance');
+  const nowIso = new Date().toISOString();
+  const deviceId = getDeviceId();
+
+  await addDoc(attColl, {
+    timestamp: nowIso,
+    memberId: member.memberId,
+    name: member.name,
+    phone: member.phone,
+    plan: member.plan,
+    status: getMemberStatus(member.endDate),
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'checkin',
+    title: '🔔 Terminal Phone Check-In',
+    message: `${member.name} checked in via terminal using Phone (${phone})!`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+    memberName: member.name,
+    memberId: member.memberId,
+  });
+
+  return {
+    success: true,
+    members: [
+      {
+        memberId: member.memberId,
+        fullName: member.name,
+        phone: member.phone,
+        plan: member.plan,
+        planType: member.plan,
+        status: getMemberStatus(member.endDate),
+        expirationDate: member.endDate,
+      },
+    ],
+  };
+}
+
+export async function dbCheckInId(businessName: string, memberId: string): Promise<CheckInResponse> {
+  await ensureFirebaseAuth();
+  const cleanId = memberId.trim();
+  const membersRef = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersRef);
+  const matched = snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Member) }))
+    .find((m) => m.memberId.toLowerCase() === cleanId.toLowerCase());
+
+  if (!matched) {
+    return { success: false, notFound: true, message: `Member ID #${cleanId} not found.` };
+  }
+
+  const attColl = getBusinessCollectionRef(businessName, 'attendance');
+  const nowIso = new Date().toISOString();
+  const deviceId = getDeviceId();
+
+  await addDoc(attColl, {
+    timestamp: nowIso,
+    memberId: matched.memberId,
+    name: matched.name,
+    phone: matched.phone,
+    plan: matched.plan,
+    status: getMemberStatus(matched.endDate),
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'checkin',
+    title: '🔔 Terminal Member Check-In',
+    message: `Member #${matched.memberId} (${matched.name}) successfully checked in!`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+    memberName: matched.name,
+    memberId: matched.memberId,
+  });
+
+  return {
+    success: true,
+    members: [
+      {
+        memberId: matched.memberId,
+        fullName: matched.name,
+        phone: matched.phone,
+        plan: matched.plan,
+        planType: matched.plan,
+        status: getMemberStatus(matched.endDate),
+        expirationDate: matched.endDate,
+      },
+    ],
+  };
+}
+
+export async function dbRecordWalkIn(
+  businessName: string,
+  data: { name: string; phone?: string; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+  const staff = data.staff || 'Duty Staff';
+
+  // 1. Attendance doc
+  const attColl = getBusinessCollectionRef(businessName, 'attendance');
+  await addDoc(attColl, {
+    timestamp,
+    memberId: 'GUEST',
+    name: data.name || 'Walk-In Guest',
+    phone: data.phone || '-',
+    plan: 'Walk-In Pass',
+    status: 'Active',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  // 2. Sales doc
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'Walk-In',
+    customer: `${data.name || 'Walk-In Guest'} (Walk-In)`,
+    phone: data.phone || '-',
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff,
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'walkin',
+    title: '🎟️ Walk-In Pass Issued',
+    message: `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
+    timestamp: getBruneiFormattedTime(now, true),
+    memberName: data.name,
+  });
+}
+
+export async function dbRecordPOS(
+  businessName: string,
+  data: { itemName: string; qty: number; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'POS',
+    customer: `${data.itemName} x${data.qty}`,
+    itemName: data.itemName,
+    qty: Number(data.qty) || 1,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'pos',
+    title: '🛒 POS Item Sold',
+    message: `Sold ${data.itemName} (x${data.qty}) - $${data.amount}`,
+    timestamp: getBruneiFormattedTime(now, true),
+  });
+}
+
+export async function dbRecordClass(
+  businessName: string,
+  data: { className: string; clientName: string; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'Class',
+    customer: `${data.clientName} (${data.className})`,
+    className: data.className,
+    clientName: data.clientName,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'class',
+    title: '🧘 Class Pass Sold',
+    message: `Class pass for ${data.className} recorded for ${data.clientName}`,
+    timestamp: getBruneiFormattedTime(now, true),
+  });
+}
+
+export async function dbRecordPTIn(
+  businessName: string,
+  data: { trainerName: string; clientName: string; sessions: string; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'Personal Training',
+    customer: `Client: ${data.clientName} | Trainer: ${data.trainerName} | ${data.sessions} Sessions`,
+    trainerName: data.trainerName,
+    clientName: data.clientName,
+    sessions: data.sessions,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'pt',
+    title: '💪 Personal Training Package',
+    message: `PT Package: ${data.clientName} with Coach ${data.trainerName}`,
+    timestamp: getBruneiFormattedTime(now, true),
+  });
+}
+
+export async function dbRecordPTOut(
+  businessName: string,
+  data: { trainerName: string; description: string; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const expColl = getBusinessCollectionRef(businessName, 'expenses');
+  await addDoc(expColl, {
+    timestamp,
+    category: 'PT Payout',
+    description: `Coach ${data.trainerName} - ${data.description || 'PT Session Payout'}`,
+    trainerName: data.trainerName,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'pt',
+    title: '💸 PT Payout Recorded',
+    message: `PT payout for Coach ${data.trainerName}: $${data.amount}`,
+    timestamp: getBruneiFormattedTime(now, true),
+  });
+}
+
+export async function dbRecordExpense(
+  businessName: string,
+  data: { category: string; description: string; amount: number; paymentMethod: string; staff?: string; viewDate?: string }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const expColl = getBusinessCollectionRef(businessName, 'expenses');
+  await addDoc(expColl, {
+    timestamp,
+    category: data.category,
+    description: data.description,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.amount) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'expense',
+    title: '🧾 Expense Logged',
+    message: `Expense logged: ${data.description || data.category} ($${data.amount})`,
+    timestamp: getBruneiFormattedTime(now, true),
+  });
+}
+
+export async function dbRegisterMember(
+  businessName: string,
+  data: {
+    name: string;
+    phone: string;
+    planType: string;
+    price: number;
+    startDate: string;
+    endDate: string;
+    paymentMethod: string;
+    staff?: string;
+    viewDate?: string;
+  }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+  const memberId = 'MEM-' + Math.floor(100000 + Math.random() * 900000);
+
+  // 1. Member doc
+  const membersColl = getBusinessCollectionRef(businessName, 'members');
+  await setDoc(doc(membersColl, memberId), {
+    memberId,
+    name: data.name,
+    phone: data.phone,
+    plan: data.planType,
+    startDate: data.startDate,
+    endDate: data.endDate,
+    price: Number(data.price) || 0,
+    status: getMemberStatus(data.endDate),
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  // 2. Sales doc
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'Membership',
+    customer: `${data.name} (${data.planType})`,
+    phone: data.phone,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.price) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'membership',
+    title: '⭐ New Member Registered',
+    message: `Registered new member ${data.name} (${data.planType})`,
+    timestamp: getBruneiFormattedTime(now, true),
+    memberName: data.name,
+    memberId,
+  });
+}
+
+export async function dbRenewMember(
+  businessName: string,
+  data: {
+    memberId: string;
+    planType: string;
+    price: number;
+    paymentMethod: string;
+    staff?: string;
+    viewDate?: string;
+  }
+) {
+  await ensureFirebaseAuth();
+  const now = new Date();
+  const timestamp = data.viewDate ? `${data.viewDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+  const deviceId = getDeviceId();
+
+  const membersColl = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersColl);
+  const memberDoc = snap.docs.find((d) => {
+    const dData = d.data();
+    return dData.memberId === data.memberId || d.id === data.memberId;
+  });
+
+  let currentEnd = new Date();
+  if (memberDoc) {
+    const existingEnd = new Date(memberDoc.data().endDate);
+    if (!isNaN(existingEnd.getTime()) && existingEnd.getTime() > currentEnd.getTime()) {
+      currentEnd = existingEnd;
     }
   }
+
+  currentEnd.setMonth(currentEnd.getMonth() + 1);
+  const newEndDate = getBruneiTodayIsoDate(currentEnd);
+
+  if (memberDoc) {
+    await updateDoc(doc(membersColl, memberDoc.id), {
+      endDate: newEndDate,
+      plan: data.planType,
+      status: 'Active',
+      updatedAt: serverTimestamp(),
+      deviceId,
+    });
+  }
+
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  await addDoc(salesColl, {
+    timestamp,
+    category: 'Membership',
+    customer: `Renewal: Member #${data.memberId} (${data.planType})`,
+    paymentMethod: data.paymentMethod || 'Cash',
+    amount: Number(data.price) || 0,
+    staff: data.staff || 'Duty Staff',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'membership',
+    title: '🔄 Membership Renewed',
+    message: `Renewed membership for #${data.memberId} (${data.planType})`,
+    timestamp: getBruneiFormattedTime(now, true),
+    memberId: data.memberId,
+  });
+}
+
+export async function dbDeleteSale(businessName: string, saleData: any) {
+  await ensureFirebaseAuth();
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  if (saleData.id) {
+    await deleteDoc(doc(salesColl, saleData.id));
+  } else {
+    const snap = await getDocs(salesColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return (
+        data.timestamp === saleData.timestamp &&
+        data.customer === saleData.customer &&
+        Number(data.amount) === Number(saleData.amount)
+      );
+    });
+    if (target) await deleteDoc(doc(salesColl, target.id));
+  }
+}
+
+export async function dbDeleteAttendance(businessName: string, attData: any) {
+  await ensureFirebaseAuth();
+  const attColl = getBusinessCollectionRef(businessName, 'attendance');
+  if (attData.id) {
+    await deleteDoc(doc(attColl, attData.id));
+  } else {
+    const snap = await getDocs(attColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return data.timestamp === attData.timestamp && data.name === attData.name;
+    });
+    if (target) await deleteDoc(doc(attColl, target.id));
+  }
+}
+
+export async function dbDeleteExpense(businessName: string, expData: any) {
+  await ensureFirebaseAuth();
+  const expColl = getBusinessCollectionRef(businessName, 'expenses');
+  if (expData.id) {
+    await deleteDoc(doc(expColl, expData.id));
+  } else {
+    const snap = await getDocs(expColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return (
+        data.timestamp === expData.timestamp &&
+        data.description === expData.description &&
+        Number(data.amount) === Number(expData.amount)
+      );
+    });
+    if (target) await deleteDoc(doc(expColl, target.id));
+  }
+}
+
+export async function dbDeleteMember(businessName: string, memberId: string) {
+  await ensureFirebaseAuth();
+  const membersColl = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersColl);
+  const target = snap.docs.find((d) => {
+    const data = d.data();
+    return data.memberId === memberId || d.id === memberId;
+  });
+  if (target) {
+    await deleteDoc(doc(membersColl, target.id));
+  }
+}
+
+export async function dbStartShift(businessName: string, shift: StaffShift) {
+  await ensureFirebaseAuth();
+  const bizRef = getBusinessDocRef(businessName);
+  const deviceId = getDeviceId();
+  await updateDoc(bizRef, {
+    activeShift: shift,
+    updatedAt: serverTimestamp(),
+    deviceId,
+  });
+
+  const shiftsColl = getBusinessCollectionRef(businessName, 'shifts');
+  await setDoc(doc(shiftsColl, shift.id), {
+    ...shift,
+    status: 'active',
+    deviceId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'shift',
+    title: '🟢 Duty Shift Started',
+    message: `${shift.staffName} started shift (${shift.shiftTitle || 'Duty Shift'})!`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  });
+}
+
+export async function dbEndShift(businessName: string) {
+  await ensureFirebaseAuth();
+  const bizRef = getBusinessDocRef(businessName);
+  const deviceId = getDeviceId();
+  await updateDoc(bizRef, {
+    activeShift: null,
+    updatedAt: serverTimestamp(),
+    deviceId,
+  });
+
+  await dbBroadcastEvent(businessName, {
+    type: 'shift',
+    title: '🔴 Duty Shift Ended',
+    message: 'Active duty shift ended.',
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  });
+}
+
+export async function dbResetDemoData(businessName: string) {
+  await ensureFirebaseAuth();
+  const pin = getStoredBusinessPin();
+  await seedInitialBusinessData(businessName, pin);
+  await dbBroadcastEvent(businessName, {
+    type: 'reset',
+    title: '🔄 Database Reset',
+    message: 'System database was reset to standard demo seed records in Firestore.',
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  });
 }

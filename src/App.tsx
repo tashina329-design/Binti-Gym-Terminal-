@@ -191,6 +191,7 @@ export default function App() {
 
   const [activeShift, setActiveShift] = useState<StaffShift | null>(null);
   const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
+  const [dismissShiftBanner, setDismissShiftBanner] = useState<boolean>(false);
 
   // Quick renew modal state
   const [renewMember, setRenewMember] = useState<Member | null>(null);
@@ -361,8 +362,6 @@ export default function App() {
         `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
         data.name
       );
-    } else {
-      setActiveTab('sales');
     }
     return dashboardData;
   };
@@ -373,7 +372,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -383,7 +381,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -393,7 +390,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -403,7 +399,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -413,7 +408,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -431,7 +425,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -446,7 +439,6 @@ export default function App() {
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
     });
-    setActiveTab('sales');
     return dashboardData;
   };
 
@@ -653,26 +645,36 @@ export default function App() {
         />
 
         {/* Shift Warning Banner if not started */}
-        {!activeShift && (
-          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-amber-200 backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-                <AlertTriangle className="w-5 h-5" />
+        {!activeShift && !dismissShiftBanner && (
+          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-amber-200 backdrop-blur-sm relative">
+            <div className="flex items-center gap-3 pr-6 sm:pr-0">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-sm font-bold text-amber-100">No Active Staff Shift Started</p>
-                <p className="text-xs text-amber-300/80">
-                  Transactions will be logged under generic "Duty Staff". Start a shift to track cashier duty & starting float.
+                <p className="text-xs sm:text-sm font-bold text-amber-100">No Active Staff Shift Started</p>
+                <p className="text-[11px] sm:text-xs text-amber-300/80">
+                  Transactions are logged under generic "Duty Staff". Start a shift to track cashier duty & starting float.
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowShiftModal(true)}
-              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-950/50 transition shrink-0"
-            >
-              <Play className="w-4 h-4 fill-slate-950" /> Start Duty Shift
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => setShowShiftModal(true)}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition shrink-0 cursor-pointer"
+              >
+                <Play className="w-3.5 h-3.5 fill-slate-950" /> Start Duty Shift
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissShiftBanner(true)}
+                className="p-1.5 text-amber-400/60 hover:text-amber-200 rounded-lg hover:bg-amber-900/40 transition cursor-pointer"
+                title="Dismiss notice"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 

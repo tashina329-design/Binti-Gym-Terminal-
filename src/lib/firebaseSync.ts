@@ -60,12 +60,29 @@ export function getBruneiFormattedTime(dateObj?: Date, includeSeconds = false): 
   });
 }
 
-export function isSameDate(timestamp: any, targetDateStr: string): boolean {
-  if (!timestamp || !targetDateStr) return false;
-  const str = String(timestamp).trim();
+export function toIsoTimestampString(val: any): string {
+  if (!val) return new Date().toISOString();
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return new Date(val).toISOString();
+  if (val instanceof Date) return val.toISOString();
+  if (typeof val?.toDate === 'function') {
+    try {
+      return val.toDate().toISOString();
+    } catch {}
+  }
+  if (typeof val?.seconds === 'number') {
+    return new Date(val.seconds * 1000 + (val.nanoseconds || 0) / 1000000).toISOString();
+  }
+  return String(val);
+}
+
+export function isSameDate(rawTimestamp: any, targetDateStr: string): boolean {
+  if (!rawTimestamp || !targetDateStr) return false;
+  const iso = toIsoTimestampString(rawTimestamp);
+  const str = String(iso).trim();
   if (str.startsWith(targetDateStr)) return true;
 
-  const d = new Date(timestamp);
+  const d = new Date(iso);
   if (isNaN(d.getTime())) return false;
 
   const bruneiDate = getBruneiTodayIsoDate(d);
@@ -730,136 +747,149 @@ export function subscribeFirestoreBusiness(
   // Immediately emit initial state to guarantee zero loading lag
   emitDashboard();
 
-  ensureFirebaseAuth().then(() => {
-    if (isUnsubscribed) return;
+  // Initialize auth in background without blocking snapshot listeners
+  ensureFirebaseAuth().catch((err) => {
+    console.warn('Background Firebase auth notice:', err);
+  });
 
-    try {
-      // 1. Business Root Doc listener (activeShift, settings, broadcast event)
-      const bizRef = getBusinessDocRef(cleanName);
-      const unsubBiz = onSnapshot(
-        bizRef,
-        (snap) => {
-          onStatusChange?.('connected');
-          if (snap.exists()) {
-            const data = snap.data();
-            if (data.activeShift !== undefined) {
-              liveActiveShift = data.activeShift;
-              saveStoredActiveShift(data.activeShift, cleanName);
-            }
-            if (data.staffPin) {
-              liveStaffPin = data.staffPin;
-            }
-            if (Array.isArray(data.availableStores)) {
-              liveAvailableStores = data.availableStores;
-            }
+  try {
+    // 1. Business Root Doc listener (activeShift, settings, broadcast event)
+    const bizRef = getBusinessDocRef(cleanName);
+    const unsubBiz = onSnapshot(
+      bizRef,
+      (snap) => {
+        onStatusChange?.('connected');
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.activeShift !== undefined) {
+            liveActiveShift = data.activeShift;
+            saveStoredActiveShift(data.activeShift, cleanName);
+          }
+          if (data.staffPin) {
+            liveStaffPin = data.staffPin;
+          }
+          if (Array.isArray(data.availableStores)) {
+            liveAvailableStores = data.availableStores;
+          }
 
-            if (data.lastEvent && typeof data.lastEvent === 'object') {
-              const evt = data.lastEvent;
-              const evtTime = Number(evt.timestampMs || evt.updatedAt || 0);
-              const isRemote = Boolean(evt.deviceId && evt.deviceId !== myDeviceId);
-              if (evtTime > lastHandledEventTime) {
-                lastHandledEventTime = evtTime;
-                emitDashboard(evt, isRemote);
-                return;
-              }
+          if (data.lastEvent && typeof data.lastEvent === 'object') {
+            const evt = data.lastEvent;
+            const evtTime = Number(evt.timestampMs || evt.updatedAt || 0);
+            const isRemote = Boolean(evt.deviceId && evt.deviceId !== myDeviceId);
+            if (evtTime > lastHandledEventTime) {
+              lastHandledEventTime = evtTime;
+              emitDashboard(evt, isRemote);
+              return;
             }
           }
-          emitDashboard();
-        },
-        (err) => {
-          console.warn('Firestore business doc listener status:', err);
-          onStatusChange?.('reconnecting');
         }
-      );
-      unsubs.push(unsubBiz);
+        emitDashboard();
+      },
+      (err) => {
+        console.warn('Firestore business doc listener status:', err);
+        onStatusChange?.('reconnecting');
+      }
+    );
+    unsubs.push(unsubBiz);
 
-      // 2. Members subcollection listener
-      const membersRef = getBusinessCollectionRef(cleanName, 'members');
-      const unsubMembers = onSnapshot(
-        membersRef,
-        (snap) => {
-          liveMembers = snap.docs.map((d) => {
-            const data = d.data();
-            return {
-              memberId: data.memberId || d.id,
-              name: data.name || '',
-              phone: data.phone || '',
-              plan: data.plan || '',
-              startDate: data.startDate || '',
-              endDate: data.endDate || '',
-              status: getMemberStatus(data.endDate, activeDate),
-            };
-          });
-          emitDashboard();
-        },
-        (err) => console.warn('Members listener error:', err)
-      );
-      unsubs.push(unsubMembers);
+    // 2. Members subcollection listener
+    const membersRef = getBusinessCollectionRef(cleanName, 'members');
+    const unsubMembers = onSnapshot(
+      membersRef,
+      (snap) => {
+        liveMembers = snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            memberId: data.memberId || d.id,
+            name: data.name || '',
+            phone: data.phone || '',
+            plan: data.plan || '',
+            startDate: data.startDate || '',
+            endDate: data.endDate || '',
+            status: getMemberStatus(data.endDate, activeDate),
+          };
+        });
+        emitDashboard();
+      },
+      (err) => console.warn('Members listener error:', err)
+    );
+    unsubs.push(unsubMembers);
 
-      // 3. Attendance subcollection listener
-      const attRef = getBusinessCollectionRef(cleanName, 'attendance');
-      const unsubAtt = onSnapshot(
-        attRef,
-        (snap) => {
-          liveAttendance = snap.docs.map((d) => ({
+    // 3. Attendance subcollection listener
+    const attRef = getBusinessCollectionRef(cleanName, 'attendance');
+    const unsubAtt = onSnapshot(
+      attRef,
+      (snap) => {
+        liveAttendance = snap.docs.map((d) => {
+          const data = d.data();
+          return {
             id: d.id,
-            ...d.data(),
-          }));
-          emitDashboard();
-        },
-        (err) => console.warn('Attendance listener error:', err)
-      );
-      unsubs.push(unsubAtt);
+            ...data,
+            timestamp: toIsoTimestampString(data.timestamp || data.createdAt || data.updatedAt),
+          };
+        });
+        emitDashboard();
+      },
+      (err) => console.warn('Attendance listener error:', err)
+    );
+    unsubs.push(unsubAtt);
 
-      // 4. Sales subcollection listener
-      const salesRef = getBusinessCollectionRef(cleanName, 'sales');
-      const unsubSales = onSnapshot(
-        salesRef,
-        (snap) => {
-          liveSales = snap.docs.map((d) => ({
+    // 4. Sales subcollection listener
+    const salesRef = getBusinessCollectionRef(cleanName, 'sales');
+    const unsubSales = onSnapshot(
+      salesRef,
+      (snap) => {
+        liveSales = snap.docs.map((d) => {
+          const data = d.data();
+          return {
             id: d.id,
-            ...d.data(),
-          }));
-          emitDashboard();
-        },
-        (err) => console.warn('Sales listener error:', err)
-      );
-      unsubs.push(unsubSales);
+            ...data,
+            timestamp: toIsoTimestampString(data.timestamp || data.createdAt || data.updatedAt),
+          };
+        });
+        emitDashboard();
+      },
+      (err) => console.warn('Sales listener error:', err)
+    );
+    unsubs.push(unsubSales);
 
-      // 5. Expenses subcollection listener
-      const expRef = getBusinessCollectionRef(cleanName, 'expenses');
-      const unsubExp = onSnapshot(
-        expRef,
-        (snap) => {
-          liveExpenses = snap.docs.map((d) => ({
+    // 5. Expenses subcollection listener
+    const expRef = getBusinessCollectionRef(cleanName, 'expenses');
+    const unsubExp = onSnapshot(
+      expRef,
+      (snap) => {
+        liveExpenses = snap.docs.map((d) => {
+          const data = d.data();
+          return {
             id: d.id,
-            ...d.data(),
-          }));
-          emitDashboard();
-        },
-        (err) => console.warn('Expenses listener error:', err)
-      );
-      unsubs.push(unsubExp);
+            ...data,
+            timestamp: toIsoTimestampString(data.timestamp || data.createdAt || data.updatedAt),
+          };
+        });
+        emitDashboard();
+      },
+      (err) => console.warn('Expenses listener error:', err)
+    );
+    unsubs.push(unsubExp);
 
-      // 6. Staff subcollection listener
-      const staffRef = getBusinessCollectionRef(cleanName, 'staff');
-      const unsubStaff = onSnapshot(
-        staffRef,
-        (snap) => {
-          liveStaff = snap.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as any),
-          }));
-          emitDashboard();
-        },
-        (err) => console.warn('Staff listener error:', err)
-      );
-      unsubs.push(unsubStaff);
-    } catch (err) {
-      console.warn('Error setting up Firestore subscriptions:', err);
-      onStatusChange?.('offline');
-    }
-  });
+    // 6. Staff subcollection listener
+    const staffRef = getBusinessCollectionRef(cleanName, 'staff');
+    const unsubStaff = onSnapshot(
+      staffRef,
+      (snap) => {
+        liveStaff = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        }));
+        emitDashboard();
+      },
+      (err) => console.warn('Staff listener error:', err)
+    );
+    unsubs.push(unsubStaff);
+  } catch (err) {
+    console.warn('Error setting up Firestore subscriptions:', err);
+    onStatusChange?.('offline');
+  }
 
   return () => {
     isUnsubscribed = true;

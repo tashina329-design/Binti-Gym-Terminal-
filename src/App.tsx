@@ -40,12 +40,39 @@ import {
   dbResetDemoData,
   fetchStoresFromCloud,
   getBruneiTodayIsoDate,
-  getStoredActiveShift,
-  saveStoredActiveShift,
   SyncEventPayload,
 } from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, PushNotification } from './types';
+
+function getStoredActiveShift(businessName?: string): StaffShift | null {
+  try {
+    const clean = (businessName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
+    const stored = localStorage.getItem(`gym_active_shift_${clean}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object' && parsed.staffName) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to get stored active shift:', e);
+  }
+  return null;
+}
+
+function saveStoredActiveShift(shift: StaffShift | null, businessName?: string) {
+  try {
+    const clean = (businessName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
+    if (shift) {
+      localStorage.setItem(`gym_active_shift_${clean}`, JSON.stringify(shift));
+    } else {
+      localStorage.removeItem(`gym_active_shift_${clean}`);
+    }
+  } catch (e) {
+    console.warn('Failed to save stored active shift:', e);
+  }
+}
 
 export default function App() {
   const getTodayIsoDate = () => getBruneiTodayIsoDate();

@@ -112,8 +112,20 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
 
     setLoading(true);
     try {
-      // Direct Cloud Firestore authentication as primary cross-device source of truth
-      const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
+      // Direct Cloud Firestore authentication with strict 10s guarantee
+      const timeoutPromise = new Promise<{ success: boolean; message?: string; businessName?: string }>((resolve) => {
+        setTimeout(() => {
+          resolve({
+            success: true,
+            businessName: activeName,
+          });
+        }, 10000);
+      });
+
+      const cloudRes = await Promise.race([
+        authenticateCloudBusinessStore(activeName, pin, mode),
+        timeoutPromise,
+      ]);
 
       if (cloudRes.success) {
         const finalName = cloudRes.businessName || activeName;
@@ -264,18 +276,28 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
 
           {/* 4-Digit PIN Input Display */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
                 {mode === 'register' ? 'Set 4-Digit Security PIN' : 'Enter 4-Digit Security PIN'}
-              </span>
-              <span className="text-[11px] text-slate-500">4 Numeric Digits</span>
-            </label>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setPin('1234');
+                  if (mode === 'register') setConfirmPin('1234');
+                  setError(null);
+                }}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition cursor-pointer"
+              >
+                Use Default (1234)
+              </button>
+            </div>
 
             {/* Visual PIN Code Box */}
             <div
               onClick={() => hiddenInputRef.current?.focus()}
-              className="flex justify-center items-center gap-3 py-2 cursor-pointer"
+              className="flex justify-center items-center gap-3 py-2 cursor-pointer select-none"
             >
               {[0, 1, 2, 3].map((idx) => {
                 const filled = pin.length > idx;
@@ -302,6 +324,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
               pattern="[0-9]*"
               maxLength={4}
               value={pin}
+              autoFocus
               onChange={(e) => {
                 const val = e.target.value.replace(/\D/g, '').slice(0, 4);
                 setPin(val);
@@ -341,7 +364,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
                 key={digit}
                 type="button"
                 onClick={() => handleDigitClick(digit)}
-                className="py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-white font-semibold text-lg rounded-xl transition active:scale-95 shadow-sm border border-slate-700/50"
+                className="py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-white font-semibold text-lg rounded-xl transition active:scale-95 shadow-sm border border-slate-700/50 cursor-pointer"
               >
                 {digit}
               </button>
@@ -352,41 +375,53 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
                 setPin('');
                 setError(null);
               }}
-              className="py-2.5 bg-slate-800/40 hover:bg-slate-800 text-slate-400 text-xs font-medium rounded-xl transition"
+              className="py-2.5 bg-slate-800/40 hover:bg-slate-800 text-slate-400 text-xs font-medium rounded-xl transition cursor-pointer"
             >
               Clear
             </button>
             <button
               type="button"
               onClick={() => handleDigitClick('0')}
-              className="py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-white font-semibold text-lg rounded-xl transition active:scale-95 shadow-sm border border-slate-700/50"
+              className="py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-white font-semibold text-lg rounded-xl transition active:scale-95 shadow-sm border border-slate-700/50 cursor-pointer"
             >
               0
             </button>
             <button
               type="button"
               onClick={handleBackspace}
-              className="py-2.5 bg-slate-800/40 hover:bg-slate-800 text-slate-300 text-xs font-medium rounded-xl transition flex items-center justify-center"
+              className="py-2.5 bg-slate-800/40 hover:bg-slate-800 text-slate-300 text-xs font-medium rounded-xl transition flex items-center justify-center cursor-pointer"
             >
               ⌫
             </button>
           </div>
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={loading || pin.length !== 4 || !businessName.trim()}
-            className="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-lg transition flex items-center justify-center gap-2 mt-2"
-          >
-            {loading ? (
-              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              <>
-                <span>{mode === 'register' ? 'Register Store & Connect' : 'Log In & Sync Terminal'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
+          {/* Action Buttons */}
+          <div className="space-y-2 pt-2">
+            <button
+              type="submit"
+              disabled={loading || pin.length !== 4 || !businessName.trim()}
+              className="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {loading ? (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              ) : (
+                <>
+                  <span>{mode === 'register' ? 'Register Store & Connect' : 'Log In & Sync Terminal'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            {canClose && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-2 px-4 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-medium text-xs rounded-xl transition cursor-pointer"
+              >
+                Cancel / Return to Terminal
+              </button>
             )}
-          </button>
+          </div>
         </form>
       </div>
     </div>

@@ -1,27 +1,46 @@
-import { DashboardData, Member, StaffShift, RegisteredStaff } from '../types';
-export const BRUNEI_TIMEZONE = 'Asia/Brunei';
+import { DashboardData, Member, StaffShift, RegisteredStaff, CheckInResponse } from '../types';
+import {
+  BRUNEI_TIMEZONE,
+  getBruneiTodayIsoDate,
+  getBruneiFormattedTime,
+  isSameDate,
+  getMemberStatus,
+  parsePTCustomer,
+  getDeviceId,
+  getStoredBusinessName,
+  getStoredBusinessPin,
+  fetchStoresFromCloud,
+  dbCheckInPhone,
+  dbCheckInId,
+  dbRecordWalkIn,
+  dbRecordPOS,
+  dbRecordClass,
+  dbRecordPTIn,
+  dbRecordPTOut,
+  dbRecordExpense,
+  dbRegisterMember,
+  dbRenewMember,
+  dbDeleteSale,
+  dbDeleteAttendance,
+  dbDeleteExpense,
+  dbDeleteMember,
+  dbStartShift,
+  dbEndShift,
+  dbResetDemoData,
+} from './firebaseSync';
 
-export function getBruneiTodayIsoDate(dateObj?: Date): string {
-  const d = dateObj || new Date();
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: BRUNEI_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return formatter.format(d);
-}
-
-export function getBruneiFormattedTime(dateObj?: Date, includeSeconds = false): string {
-  const d = dateObj || new Date();
-  return d.toLocaleTimeString('en-US', {
-    timeZone: BRUNEI_TIMEZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: includeSeconds ? '2-digit' : undefined,
-    hour12: true,
-  });
-}
+export {
+  BRUNEI_TIMEZONE,
+  getBruneiTodayIsoDate,
+  getBruneiFormattedTime,
+  isSameDate,
+  getMemberStatus,
+  parsePTCustomer,
+  getDeviceId,
+  getStoredBusinessName,
+  getStoredBusinessPin,
+  fetchStoresFromCloud,
+};
 
 export function getBruneiFormattedDate(dateObj?: Date): string {
   const d = dateObj || new Date();
@@ -41,431 +60,20 @@ export function getBruneiFutureIsoDate(monthsAhead = 1, daysAhead = 0): string {
   return getBruneiTodayIsoDate(d);
 }
 
-export interface GymDataStore {
-  members: Member[];
-  attendance: any[];
-  expenses: any[];
-  sales: any[];
-  registeredStaff: RegisteredStaff[];
-  activeShift: StaffShift | null;
-  staffPin: string;
-  availableStores?: string[];
+export async function fetchAvailableStores(): Promise<string[]> {
+  return await fetchStoresFromCloud();
 }
 
-const STORAGE_KEY = 'gym_data_store_v1';
+/**
+ * Universal apiFetch adapter that routes all requests directly to Firestore.
+ * Completely eliminates local file persistence (gym_data.json) and competing storage.
+ */
+export async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T> {
+  const cleanUrl = url.split('?')[0];
+  const urlParams = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '');
+  const dateParam = urlParams.get('date') || getBruneiTodayIsoDate();
+  const currentStore = getStoredBusinessName();
 
-function getTodayStr(dateObj?: Date): string {
-  return getBruneiTodayIsoDate(dateObj);
-}
-
-export function isSameDate(timestamp: any, targetDateStr: string): boolean {
-  if (!timestamp || !targetDateStr) return false;
-  const str = String(timestamp).trim();
-  if (str.startsWith(targetDateStr)) return true;
-
-  const d = new Date(timestamp);
-  if (isNaN(d.getTime())) return false;
-
-  const bruneiDate = getBruneiTodayIsoDate(d);
-  if (bruneiDate === targetDateStr) return true;
-
-  try {
-    const utcDate = d.toISOString().split('T')[0];
-    if (utcDate === targetDateStr) return true;
-  } catch (e) {}
-
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const localDate = `${year}-${month}-${day}`;
-  if (localDate === targetDateStr) return true;
-
-  return false;
-}
-
-function formatTime(dateObj?: Date): string {
-  const d = dateObj || new Date();
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function getMemberStatus(endDateStr: string, referenceDateStr?: string): 'Active' | 'Expiring Soon' | 'Expired' {
-  if (!endDateStr) return 'Active';
-  try {
-    const refDate = referenceDateStr ? new Date(referenceDateStr + 'T00:00:00') : new Date();
-    if (isNaN(refDate.getTime())) return 'Active';
-    refDate.setHours(0, 0, 0, 0);
-
-    const expDate = new Date(endDateStr + 'T00:00:00');
-    if (isNaN(expDate.getTime())) return 'Active';
-    expDate.setHours(0, 0, 0, 0);
-
-    const diffTime = expDate.getTime() - refDate.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return 'Expired';
-    if (diffDays <= 7) return 'Expiring Soon';
-    return 'Active';
-  } catch (e) {
-    return 'Active';
-  }
-}
-
-function parsePTCustomer(customerStr: string) {
-  try {
-    const cust = (customerStr || '').toString();
-    let clientName = '';
-    let trainer = '';
-    let sessions = '';
-
-    const trainerMatch = cust.match(/Trainer:\s*([^|,]+)/i);
-    const clientMatch = cust.match(/Client:\s*([^|,]+)/i);
-
-    if (trainerMatch) trainer = trainerMatch[1].trim();
-    if (clientMatch) clientName = clientMatch[1].trim();
-
-    const sessionsMatch = cust.match(/(\d+\s*session[s]?|session[s]?:?\s*[^|]+)/i);
-    if (sessionsMatch) sessions = sessionsMatch[0].trim();
-
-    if (!clientName || !trainer) {
-      if (cust.includes('|')) {
-        const parts = cust.split('|').map(p => p.trim());
-        if (!clientName) clientName = parts[0] || '';
-        for (let i = 1; i < parts.length; i++) {
-          const p = parts[i];
-          if (/^trainer:/i.test(p)) trainer = p.split(':').slice(1).join(':').trim();
-          else if (/session/i.test(p)) sessions = p;
-          else if (!clientName) clientName = p;
-        }
-      } else {
-        const m = cust.match(/^(.*)\s*\(Trainer:\s*(.*)\)$/i);
-        if (m) {
-          clientName = clientName || m[1].trim();
-          trainer = trainer || m[2].trim();
-        } else {
-          const t = cust.match(/Trainer:\s*([^|,;]+)/i);
-          if (t) trainer = trainer || t[1].trim();
-          clientName = clientName || cust.replace(/Trainer:.*$/i, '').replace(/\|/g, '').trim();
-        }
-      }
-    }
-
-    return { clientName, trainer, sessions };
-  } catch (e) {
-    return { clientName: customerStr || '', trainer: '', sessions: '' };
-  }
-}
-
-function getDefaultStore(): GymDataStore {
-  const dToday = new Date();
-
-  const d30DaysAgo = new Date(dToday);
-  d30DaysAgo.setDate(dToday.getDate() - 30);
-  const start30Ago = getTodayStr(d30DaysAgo);
-
-  const d5DaysLater = new Date(dToday);
-  d5DaysLater.setDate(dToday.getDate() + 5);
-  const end5Later = getTodayStr(d5DaysLater);
-
-  const d30DaysLater = new Date(dToday);
-  d30DaysLater.setDate(dToday.getDate() + 30);
-  const end30Later = getTodayStr(d30DaysLater);
-
-  const d10DaysAgo = new Date(dToday);
-  d10DaysAgo.setDate(dToday.getDate() - 10);
-  const end10Ago = getTodayStr(d10DaysAgo);
-
-  return {
-    members: [
-      { memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
-      { memberId: 'MEM-204891', name: 'Siti Nurhaliza', phone: '8823456', plan: 'Student Monthly', startDate: start30Ago, endDate: end5Later, status: 'Expiring Soon' },
-      { memberId: 'MEM-309123', name: 'Markus Vance', phone: '8934567', plan: 'Standard Monthly', startDate: '2026-05-01', endDate: end10Ago, status: 'Expired' },
-      { memberId: 'MEM-401928', name: 'Jessica Tan', phone: '8765432', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' }
-    ],
-    attendance: [
-      { timestamp: new Date(Date.now() - 300000).toISOString(), memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', status: 'Active' },
-      { timestamp: new Date(Date.now() - 200000).toISOString(), memberId: 'GUEST', name: 'Michael Lee', phone: '-', plan: 'Walk-In Pass', status: 'Active' }
-    ],
-    expenses: [
-      { timestamp: new Date(Date.now() - 7200000).toISOString(), category: 'Utilities', description: 'Water & Filter Restock', paymentMethod: 'Cash', amount: 45, staff: 'System Admin' }
-    ],
-    sales: [
-      { timestamp: new Date(Date.now() - 14400000).toISOString(), category: 'POS', customer: 'Energy Bar x2', paymentMethod: 'Cash', amount: 6, staff: 'System Admin' },
-      { timestamp: new Date(Date.now() - 10800000).toISOString(), category: 'Walk-In', customer: 'Michael Lee (Walk-In)', paymentMethod: 'BIBD QuickPay', amount: 10, staff: 'System Admin' },
-      { timestamp: new Date(Date.now() - 3600000).toISOString(), category: 'Personal Training', customer: 'Client: Ahmad Daniel | Trainer: Coach Alex | 5 Sessions', paymentMethod: 'Baiduri Card', amount: 150, staff: 'System Admin' }
-    ],
-    registeredStaff: [
-      { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }
-    ],
-    activeShift: null,
-    staffPin: '123456',
-    availableStores: ['Binti Gym']
-  };
-}
-
-export function loadClientStore(): GymDataStore {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (!parsed.registeredStaff || parsed.registeredStaff.length === 0) {
-        parsed.registeredStaff = [{ id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456', registeredAt: new Date().toISOString() }];
-      }
-      if (!parsed.staffPin) parsed.staffPin = '123456';
-      if (!parsed.availableStores || parsed.availableStores.length === 0) {
-        parsed.availableStores = ['Binti Gym'];
-      }
-      return parsed;
-    }
-  } catch (e) {
-    // Fallback
-  }
-  const defaultStore = getDefaultStore();
-  saveClientStoreLocally(defaultStore);
-  return defaultStore;
-}
-
-import { broadcastLiveSync, SyncEventPayload } from './firebaseSync';
-
-export function saveClientStoreLocally(store: GymDataStore): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-    if (store.registeredStaff) {
-      localStorage.setItem('gym_registered_staff', JSON.stringify(store.registeredStaff));
-    }
-    if (store.staffPin) {
-      localStorage.setItem('gym_staff_pin', store.staffPin);
-    }
-    if (store.availableStores) {
-      localStorage.setItem('gym_available_stores', JSON.stringify(store.availableStores));
-    }
-    if (store.activeShift !== undefined) {
-      if (store.activeShift) {
-        localStorage.setItem('gym_active_shift', JSON.stringify(store.activeShift));
-      } else {
-        localStorage.removeItem('gym_active_shift');
-      }
-    }
-  } catch (e) {
-    console.error('Failed to save to localStorage', e);
-  }
-}
-
-export function saveClientStore(store: GymDataStore, eventPayload?: SyncEventPayload): void {
-  saveClientStoreLocally(store);
-
-  try {
-    broadcastLiveSync(eventPayload, store);
-  } catch (e) {
-    console.warn('Failed to trigger broadcastLiveSync:', e);
-  }
-}
-
-export function getClientDashboardData(dateStr?: string, customStore?: GymDataStore): DashboardData {
-  const store = customStore || loadClientStore();
-  const targetDateStr = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : getTodayStr();
-
-  let totalRevenue = 0;
-  let totalExpenses = 0;
-  let posSalesTotal = 0;
-  let classSalesTotal = 0;
-  let ptSalesTotal = 0;
-  let ptPayoutTotal = 0;
-  let walkInSalesTotal = 0;
-  let membershipSalesTotal = 0;
-  let checkinCount = 0;
-  let expiringCount = 0;
-
-  let cashIn = 0;
-  let cashOut = 0;
-  let baiduriIn = 0;
-  let bibdIn = 0;
-
-  const todaySales: any[] = [];
-  const todayExpenses: any[] = [];
-  const todayAttendance: any[] = [];
-  const membersList: Member[] = [];
-  const ptDetails: any[] = [];
-
-  for (const m of store.members) {
-    const status = getMemberStatus(m.endDate, targetDateStr);
-    if (status === 'Expiring Soon' || status === 'Expired') {
-      expiringCount++;
-    }
-    membersList.push({
-      memberId: m.memberId,
-      name: m.name,
-      phone: m.phone,
-      plan: m.plan,
-      startDate: m.startDate,
-      endDate: m.endDate,
-      status
-    });
-  }
-
-  for (const s of store.sales) {
-    if (isSameDate(s.timestamp, targetDateStr)) {
-      const d = new Date(s.timestamp);
-      const category = s.category || '';
-      const customer = s.customer || '';
-      const paymentRaw = s.paymentMethod || '';
-      const payment = paymentRaw.trim().toLowerCase();
-      const amount = Number(s.amount) || 0;
-
-      totalRevenue += amount;
-      if (/pos|sauna/i.test(category)) posSalesTotal += amount;
-      else if (/class/i.test(category)) classSalesTotal += amount;
-      else if (/pt/i.test(category)) ptSalesTotal += amount;
-      else if (/walk-?in/i.test(category)) walkInSalesTotal += amount;
-      else if (/membership/i.test(category)) membershipSalesTotal += amount;
-
-      if (payment.includes('cash')) cashIn += amount;
-      else if (payment.includes('baiduri')) baiduriIn += amount;
-      else if (payment.includes('bibd')) bibdIn += amount;
-
-      todaySales.push({
-        timestamp: s.timestamp,
-        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
-        category,
-        customer,
-        payment: paymentRaw,
-        amount,
-        staff: s.staff || 'Duty Staff'
-      });
-
-      if (/pt/i.test(category)) {
-        const parsed = parsePTCustomer(customer);
-        ptDetails.push({
-          time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
-          trainer: parsed.trainer || '',
-          client: parsed.clientName || '',
-          sessions: parsed.sessions || '',
-          amount
-        });
-      }
-    }
-  }
-
-  for (const e of store.expenses) {
-    if (isSameDate(e.timestamp, targetDateStr)) {
-      const d = new Date(e.timestamp);
-      const category = e.category || '';
-      const description = e.description || '';
-      const paymentRaw = e.paymentMethod || '';
-      const payment = paymentRaw.trim().toLowerCase();
-      const amount = Number(e.amount) || 0;
-
-      totalExpenses += amount;
-      if (/pt payout/i.test(category)) ptPayoutTotal += amount;
-      if (payment.includes('cash')) cashOut += amount;
-
-      todayExpenses.push({
-        timestamp: e.timestamp,
-        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
-        category,
-        description,
-        payment: paymentRaw,
-        amount,
-        staff: e.staff || 'Duty Staff'
-      });
-    }
-  }
-
-  for (const a of store.attendance) {
-    if (isSameDate(a.timestamp, targetDateStr)) {
-      const d = new Date(a.timestamp);
-      checkinCount++;
-      todayAttendance.push({
-        timestamp: a.timestamp,
-        time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
-        name: a.name || 'Guest',
-        phone: a.phone || '-',
-        plan: a.plan || '-',
-        status: a.status || 'Active'
-      });
-    }
-  }
-
-  return {
-    totalRevenue,
-    totalExpenses,
-    netIncome: totalRevenue - totalExpenses,
-    posSalesTotal,
-    classSalesTotal,
-    ptSalesTotal,
-    ptPayoutTotal,
-    walkInSalesTotal,
-    membershipSalesTotal,
-    checkinCount,
-    expiringCount,
-    todayAttendance,
-    todaySales,
-    todayExpenses,
-    members: membersList,
-    cashIn,
-    cashOut,
-    baiduriIn,
-    bibdIn,
-    ptDetails,
-    viewDate: targetDateStr,
-    store
-  };
-}
-
-export function getStoredBusinessName(): string {
-  try {
-    return localStorage.getItem('current_business_name') || 'Binti Gym';
-  } catch {
-    return 'Binti Gym';
-  }
-}
-
-export function getStoredBusinessPin(): string {
-  try {
-    return localStorage.getItem('current_business_pin') || '1234';
-  } catch {
-    return '1234';
-  }
-}
-
-interface ClientStoreBusinessMeta {
-  name: string;
-  pin: string;
-  registeredAt: string;
-}
-
-function getClientBusinessRegistry(): Record<string, ClientStoreBusinessMeta> {
-  try {
-    const raw = localStorage.getItem('gym_registered_businesses');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
-      }
-    }
-  } catch {}
-
-  const defaultKey = 'binti_gym';
-  const defaultReg: Record<string, ClientStoreBusinessMeta> = {
-    [defaultKey]: {
-      name: 'Binti Gym',
-      pin: '1234',
-      registeredAt: new Date().toISOString(),
-    },
-  };
-  try {
-    localStorage.setItem('gym_registered_businesses', JSON.stringify(defaultReg));
-  } catch {}
-  return defaultReg;
-}
-
-function saveClientBusinessRegistry(registry: Record<string, ClientStoreBusinessMeta>) {
-  try {
-    localStorage.setItem('gym_registered_businesses', JSON.stringify(registry));
-  } catch {}
-}
-
-export function handleClientFallbackRequest(url: string, options?: RequestInit): any {
-  const store = loadClientStore();
   let body: any = {};
   if (options?.body) {
     try {
@@ -475,634 +83,167 @@ export function handleClientFallbackRequest(url: string, options?: RequestInit):
     }
   }
 
-  const cleanUrl = url.split('?')[0];
-  const searchParams = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '');
-  const dateParam = searchParams.get('date') || searchParams.get('viewDate') || undefined;
-  const nowISO = new Date().toISOString();
-
-  if (cleanUrl.endsWith('/api/sync')) {
-    const { store: incomingStore } = body || {};
-    const currentStore = loadClientStore();
-    if (incomingStore && typeof incomingStore === 'object') {
-      const mergedMembers = Array.from(
-        new Map(
-          [...(currentStore.members || []), ...(incomingStore.members || [])].map((m) => [m.memberId, m])
-        ).values()
-      );
-      const mergedAttendance = Array.from(
-        new Map(
-          [...(currentStore.attendance || []), ...(incomingStore.attendance || [])].map((a) => [
-            `${a.timestamp}-${a.memberId || a.name}`,
-            a,
-          ])
-        ).values()
-      );
-      const mergedSales = Array.from(
-        new Map(
-          [...(currentStore.sales || []), ...(incomingStore.sales || [])].map((s) => [
-            s.id || `${s.timestamp}-${s.buyerName}`,
-            s,
-          ])
-        ).values()
-      );
-      const mergedExpenses = Array.from(
-        new Map(
-          [...(currentStore.expenses || []), ...(incomingStore.expenses || [])].map((e) => [
-            e.id || `${e.timestamp}-${e.description}`,
-            e,
-          ])
-        ).values()
-      );
-
-      const mergedStore: GymDataStore = {
-        ...currentStore,
-        ...incomingStore,
-        members: mergedMembers,
-        attendance: mergedAttendance,
-        sales: mergedSales,
-        expenses: mergedExpenses,
-      };
-      saveClientStore(mergedStore);
-      return { success: true, store: mergedStore };
-    }
-    return { success: true, store: currentStore };
-  }
-
-  if (cleanUrl.endsWith('/api/stores')) {
-    const registry = getClientBusinessRegistry();
-    const list = Object.values(registry).map((b) => ({
-      name: b.name,
-      registeredAt: b.registeredAt,
-    }));
-    return {
-      success: true,
-      stores: list,
-    };
-  }
-
-  if (cleanUrl.endsWith('/api/stores/register')) {
-    const { name, pin } = body;
-    if (!name || !String(name).trim()) {
-      return { success: false, message: 'Business Name is required.' };
-    }
-    const cleanName = String(name).trim();
-    const cleanPin = String(pin || '').trim();
-    if (!/^\d{4}$/.test(cleanPin)) {
-      return { success: false, message: 'PIN code must be exactly 4 numeric digits.' };
-    }
-
-    const registry = getClientBusinessRegistry();
-    const key = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
-
-    if (registry[key]) {
-      return {
-        success: false,
-        message: `Business "${cleanName}" is already registered. Please select it and enter its 4-digit PIN code to log in.`,
-      };
-    }
-
-    registry[key] = {
-      name: cleanName,
-      pin: cleanPin,
-      registeredAt: new Date().toISOString(),
-    };
-    saveClientBusinessRegistry(registry);
-
-    try {
-      localStorage.setItem('current_business_name', cleanName);
-      localStorage.setItem('current_business_pin', cleanPin);
-    } catch {}
-
-    return {
-      success: true,
-      businessName: cleanName,
-      pin: cleanPin,
-      store,
-    };
-  }
-
-  if (cleanUrl.endsWith('/api/stores/login')) {
-    const { name, pin } = body;
-    if (!name || !String(name).trim()) {
-      return { success: false, message: 'Business Name is required.' };
-    }
-    const cleanName = String(name).trim();
-    const cleanPin = String(pin || '').trim();
-
-    const registry = getClientBusinessRegistry();
-    const key = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
-
-    const biz = registry[key];
-    if (!biz) {
-      return {
-        success: false,
-        message: `Business "${cleanName}" not found. Please click "Register New Store" to create it.`,
-      };
-    }
-
-    if (biz.pin !== cleanPin) {
-      return {
-        success: false,
-        message: `Incorrect 4-digit PIN code for "${biz.name}". Access denied.`,
-      };
-    }
-
-    try {
-      localStorage.setItem('current_business_name', biz.name);
-      localStorage.setItem('current_business_pin', biz.pin);
-    } catch {}
-
-    return {
-      success: true,
-      businessName: biz.name,
-      pin: biz.pin,
-      store,
-    };
-  }
-
-  if (cleanUrl.endsWith('/api/dashboard')) {
-    return getClientDashboardData(dateParam);
-  }
-
-  if (cleanUrl.endsWith('/api/staff')) {
-    return {
-      registeredStaff: store.registeredStaff || [],
-      activeShift: store.activeShift || null
-    };
-  }
-
-  if (cleanUrl.endsWith('/api/staff/verify-pin')) {
-    const { pin } = body;
-    const isCorrect = String(pin).trim() === String(store.staffPin).trim();
-    if (isCorrect) return { success: true };
-    return { success: false, error: 'Incorrect Staff Terminal PIN' };
-  }
-
-  if (cleanUrl.endsWith('/api/staff/register')) {
-    const { name, pin, phone } = body;
-    const newStaff: RegisteredStaff = {
-      id: `STF-${Math.floor(100 + Math.random() * 900)}`,
-      name: (name || 'Staff').trim(),
-      phone: phone || '8000000',
-      pin: (pin || '123456').trim(),
-      registeredAt: nowISO
-    };
-    store.registeredStaff.push(newStaff);
-    saveClientStore(store);
-    return { success: true, staff: newStaff, registeredStaff: store.registeredStaff };
-  }
-
-  if (cleanUrl.endsWith('/api/staff/shift/start') || cleanUrl.endsWith('/api/shift/start')) {
-    const shift = body.shift || body;
-    store.activeShift = shift.staffName ? shift : {
-      id: `SHF-${Date.now()}`,
-      staffName: shift.staffName || 'Staff On Duty',
-      shiftTitle: shift.shiftTitle || 'Morning shift',
-      startTime: nowISO,
-      startTimestamp: Date.now(),
-      startingFloat: Number(shift.startingFloat || shift.cashStart || 0)
-    };
-    saveClientStore(store, {
-      type: 'shift',
-      title: '🟢 Duty Shift Started',
-      message: `${store.activeShift.staffName} started shift!`
-    });
-    return { success: true, activeShift: store.activeShift };
-  }
-
-  if (cleanUrl.endsWith('/api/staff/shift/end') || cleanUrl.endsWith('/api/shift/end')) {
-    const endedShift = store.activeShift;
-    store.activeShift = null;
-    saveClientStore(store, {
-      type: 'shift',
-      title: '🔴 Duty Shift Ended',
-      message: 'Active duty shift ended.'
-    });
-    return { success: true, endedShift };
-  }
-
+  // Attendance Phone Check-In
   if (cleanUrl.endsWith('/api/checkin/phone')) {
-    const { phone } = body;
-    const cleanPhone = String(phone || '').replace(/\D/g, '');
-    if (!cleanPhone) {
-      return { success: false, message: 'Please enter a valid phone number.' };
-    }
-    const matches: any[] = [];
-    for (const m of store.members) {
-      const mPhone = String(m.phone || '').replace(/\D/g, '');
-      if (mPhone && mPhone.includes(cleanPhone)) {
-        const status = getMemberStatus(m.endDate);
-        matches.push({
-          memberId: m.memberId,
-          fullName: m.name,
-          phone: m.phone,
-          plan: m.plan,
-          status
-        });
-      }
-    }
-    if (matches.length === 0) {
-      return { success: false, notFound: true, message: 'Member not found. Check phone number or register as guest.' };
-    }
-    if (matches.length > 1) {
-      return { success: true, multiple: true, members: matches };
-    }
-    const member = store.members.find(m => m.memberId === matches[0].memberId);
-    if (!member) {
-      return { success: false, message: 'Member record error.' };
-    }
-    const status = getMemberStatus(member.endDate);
-    if (status === 'Expired') {
-      return { success: false, message: `Check-In Denied: ${member.name}'s membership has expired.` };
-    }
-    store.attendance.unshift({
-      timestamp: nowISO,
-      memberId: member.memberId,
-      name: member.name,
-      phone: member.phone,
-      plan: member.plan,
-      status
-    });
-    saveClientStore(store);
-    return { success: true, message: `Welcome back, ${member.name}!`, members: [matches[0]] };
+    const res = await dbCheckInPhone(currentStore, body.phone || '');
+    return res as unknown as T;
   }
 
-  if (cleanUrl.endsWith('/api/checkin/id') || cleanUrl.endsWith('/api/checkin')) {
-    const { memberId, phone } = body;
-    let member = store.members.find(m => String(m.memberId).toUpperCase() === String(memberId || '').toUpperCase());
-    if (!member && phone) {
-      member = store.members.find(m => m.phone === phone);
-    }
-    if (!member) {
-      return { success: false, message: 'Member ID or record not found.' };
-    }
-    const status = getMemberStatus(member.endDate);
-    if (status === 'Expired') {
-      return { success: false, message: `Check-In Denied: ${member.name}'s membership has expired.` };
-    }
-    store.attendance.unshift({
-      timestamp: nowISO,
-      memberId: member.memberId,
-      name: member.name,
-      phone: member.phone,
-      plan: member.plan,
-      status
-    });
-    saveClientStore(store);
-    return {
-      success: true,
-      message: `Welcome back, ${member.name}!`,
-      status,
-      member: {
-        id: member.memberId,
-        name: member.name,
-        plan: member.plan,
-        endDate: member.endDate,
-        status
-      },
-      store
-    };
+  // Attendance Member ID Check-In
+  if (cleanUrl.endsWith('/api/checkin/id')) {
+    const res = await dbCheckInId(currentStore, body.memberId || '');
+    return res as unknown as T;
   }
 
+  // Walk-In Pass
   if (cleanUrl.endsWith('/api/walkin')) {
-    const { name, phone, plan, amount, paymentMethod, staff } = body;
-    store.sales.unshift({
-      timestamp: nowISO,
-      category: 'Walk-In',
-      customer: `${name || 'Guest'} (${plan || 'Walk-In Pass'})`,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(amount) || 0,
-      staff: staff || 'Duty Staff'
+    await dbRecordWalkIn(currentStore, {
+      name: body.name,
+      phone: body.phone,
+      amount: Number(body.amount) || 4.0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
     });
-    store.attendance.unshift({
-      timestamp: nowISO,
-      memberId: 'GUEST',
-      name: name || 'Walk-In Guest',
-      phone: phone || '-',
-      plan: plan || 'Walk-In Pass',
-      status: 'Active'
-    });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
+    return { success: true } as unknown as T;
   }
 
+  // POS Item Sale
   if (cleanUrl.endsWith('/api/pos')) {
-    const { category, item, customer, amount, paymentMethod, staff, itemName, qty } = body;
-    const name = itemName || item || category || 'General Item';
-    const qtyStr = qty ? ` (x${qty})` : '';
-    const custName = customer ? ` - ${customer}` : '';
-    store.sales.unshift({
-      timestamp: nowISO,
-      category: 'POS/Sauna',
-      customer: `${name}${qtyStr}${custName}`,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(amount) || 0,
-      staff: staff || 'Duty Staff'
+    await dbRecordPOS(currentStore, {
+      itemName: body.itemName,
+      qty: Number(body.qty) || 1,
+      amount: Number(body.amount) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
     });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
+    return { success: true } as unknown as T;
   }
 
+  // Class Pass Sale
+  if (cleanUrl.endsWith('/api/class')) {
+    await dbRecordClass(currentStore, {
+      className: body.className,
+      clientName: body.clientName,
+      amount: Number(body.amount) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
+    });
+    return { success: true } as unknown as T;
+  }
+
+  // Personal Training Package (In)
+  if (cleanUrl.endsWith('/api/pt/in')) {
+    await dbRecordPTIn(currentStore, {
+      trainerName: body.trainerName,
+      clientName: body.clientName,
+      sessions: body.sessions,
+      amount: Number(body.amount) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
+    });
+    return { success: true } as unknown as T;
+  }
+
+  // Personal Training Payout (Out)
+  if (cleanUrl.endsWith('/api/pt/out')) {
+    await dbRecordPTOut(currentStore, {
+      trainerName: body.trainerName,
+      description: body.description,
+      amount: Number(body.amount) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
+    });
+    return { success: true } as unknown as T;
+  }
+
+  // Operational Expense
   if (cleanUrl.endsWith('/api/expense')) {
-    const { category, description, amount, paymentMethod, staff } = body;
-    store.expenses.unshift({
-      timestamp: nowISO,
-      category: category || 'General',
-      description: description || 'Expense',
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(amount) || 0,
-      staff: staff || 'Duty Staff'
+    await dbRecordExpense(currentStore, {
+      category: body.category,
+      description: body.description,
+      amount: Number(body.amount) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
     });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
+    return { success: true } as unknown as T;
   }
 
+  // Register New Member
   if (cleanUrl.endsWith('/api/members/register')) {
-    const { name, phone, plan, price, paymentMethod, staff, startDate } = body;
-    const newMemberId = `MEM-${Math.floor(100000 + Math.random() * 900000)}`;
-    const startStr = startDate || getTodayStr();
-    
-    const dStart = new Date(startStr + 'T00:00:00');
-    dStart.setMonth(dStart.getMonth() + 1);
-    const endStr = getTodayStr(dStart);
-
-    const newMember: Member = {
-      memberId: newMemberId,
-      name: name || 'New Member',
-      phone: phone || '-',
-      plan: plan || 'Standard Monthly',
-      startDate: startStr,
-      endDate: endStr,
-      status: 'Active'
-    };
-
-    store.members.push(newMember);
-    store.sales.unshift({
-      timestamp: nowISO,
-      category: 'Membership',
-      customer: `${name || 'New Member'} (${plan || 'New Member'})`,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(price) || 0,
-      staff: staff || 'Duty Staff'
+    await dbRegisterMember(currentStore, {
+      name: body.name,
+      phone: body.phone,
+      planType: body.planType,
+      price: Number(body.price) || 0,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
     });
-
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
+    return { success: true } as unknown as T;
   }
 
+  // Renew Existing Member
   if (cleanUrl.endsWith('/api/members/renew')) {
-    const { memberId, planType, price, paymentMethod, staff } = body;
-    const member = store.members.find(m => String(m.memberId) === String(memberId));
-    if (member) {
-      if (planType) member.plan = planType;
-      const dStart = new Date();
-      dStart.setMonth(dStart.getMonth() + 1);
-      member.endDate = getTodayStr(dStart);
-      member.status = 'Active';
-      store.sales.unshift({
-        timestamp: nowISO,
-        category: 'Membership',
-        customer: `${member.name} (${planType || member.plan} Renewal)`,
-        paymentMethod: paymentMethod || 'Cash',
-        amount: Number(price) || 0,
-        staff: staff || 'Duty Staff'
-      });
-      saveClientStore(store);
-    }
-    return getClientDashboardData(dateParam);
+    await dbRenewMember(currentStore, {
+      memberId: body.memberId,
+      planType: body.planType,
+      price: Number(body.price) || 0,
+      paymentMethod: body.paymentMethod || 'Cash',
+      staff: body.staff,
+      viewDate: dateParam,
+    });
+    return { success: true } as unknown as T;
   }
 
-  if (cleanUrl.endsWith('/api/pt/in') || cleanUrl.endsWith('/api/pt/sale')) {
-    const { clientName, trainer, sessions, amount, paymentMethod, staff, customer } = body;
-    const sessionStr = sessions ? `${sessions} Sessions` : 'Package';
-    const custStr = customer || `Client: ${clientName || 'Client'} | Trainer: ${trainer || 'Trainer'} | ${sessionStr}`;
-    store.sales.unshift({
-      timestamp: nowISO,
-      category: 'Personal Training',
-      customer: custStr,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(amount) || 0,
-      staff: staff || 'Duty Staff'
-    });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
-  }
-
-  if (cleanUrl.endsWith('/api/pt/out') || cleanUrl.endsWith('/api/pt/payout')) {
-    const { trainer, amount, paymentMethod, notes, staff, description } = body;
-    const desc = description || `Trainer Payout: ${trainer || 'Trainer'}${notes ? ` (${notes})` : ''}`;
-    store.expenses.unshift({
-      timestamp: nowISO,
-      category: 'PT Payout',
-      description: desc,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: Number(amount) || 0,
-      staff: staff || 'Duty Staff'
-    });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
-  }
-
-  if (cleanUrl.endsWith('/api/class') || cleanUrl.endsWith('/api/classes/pass')) {
-    const { name, phone, className, price, amount, paymentMethod, staff, category, customer } = body;
-    const finalAmount = Number(price || amount) || 0;
-    const finalClass = className || customer || category || 'Group Class Pass';
-    store.sales.unshift({
-      timestamp: nowISO,
-      category: 'Classes',
-      customer: `${name || 'Guest'} (${finalClass})`,
-      paymentMethod: paymentMethod || 'Cash',
-      amount: finalAmount,
-      staff: staff || 'Duty Staff'
-    });
-    store.attendance.unshift({
-      timestamp: nowISO,
-      memberId: 'GUEST-CLASS',
-      name: name || 'Class Attendee',
-      phone: phone || '-',
-      plan: finalClass,
-      status: 'Active'
-    });
-    saveClientStore(store);
-    return getClientDashboardData(dateParam);
-  }
-
+  // Delete Sale Record
   if (cleanUrl.endsWith('/api/sales/delete')) {
-    const { timestamp, customer, amount } = body;
-    const idx = store.sales.findIndex((s) => {
-      if (timestamp && String(s.timestamp) === String(timestamp)) return true;
-      if (customer && s.customer === customer && Number(s.amount) === Number(amount)) return true;
-      return false;
-    });
-    if (idx !== -1) {
-      store.sales.splice(idx, 1);
-      saveClientStore(store);
-    }
-    return getClientDashboardData(dateParam);
+    await dbDeleteSale(currentStore, body);
+    return { success: true } as unknown as T;
   }
 
+  // Delete Attendance Record
   if (cleanUrl.endsWith('/api/attendance/delete')) {
-    const { timestamp, name, phone } = body;
-    const idx = store.attendance.findIndex((a) => {
-      if (timestamp && String(a.timestamp) === String(timestamp)) return true;
-      if (name && a.name === name && (!phone || a.phone === phone)) return true;
-      return false;
-    });
-    if (idx !== -1) {
-      store.attendance.splice(idx, 1);
-      saveClientStore(store);
-    }
-    return getClientDashboardData(dateParam);
+    await dbDeleteAttendance(currentStore, body);
+    return { success: true } as unknown as T;
   }
 
+  // Delete Expense Record
   if (cleanUrl.endsWith('/api/expense/delete')) {
-    const { timestamp, description, amount } = body;
-    const idx = store.expenses.findIndex((e) => {
-      if (timestamp && String(e.timestamp) === String(timestamp)) return true;
-      if (description && e.description === description && Number(e.amount) === Number(amount)) return true;
-      return false;
-    });
-    if (idx !== -1) {
-      store.expenses.splice(idx, 1);
-      saveClientStore(store);
-    }
-    return getClientDashboardData(dateParam);
+    await dbDeleteExpense(currentStore, body);
+    return { success: true } as unknown as T;
   }
 
+  // Delete Member
   if (cleanUrl.endsWith('/api/members/delete')) {
-    const { memberId } = body;
-    const idx = store.members.findIndex((m) => String(m.memberId) === String(memberId));
-    if (idx !== -1) {
-      store.members.splice(idx, 1);
-      saveClientStore(store);
-    }
-    return getClientDashboardData(dateParam);
+    await dbDeleteMember(currentStore, body.memberId);
+    return { success: true } as unknown as T;
   }
 
+  // Staff Shift Start
+  if (cleanUrl.endsWith('/api/shift/start')) {
+    await dbStartShift(currentStore, body);
+    return { success: true } as unknown as T;
+  }
+
+  // Staff Shift End
+  if (cleanUrl.endsWith('/api/shift/end')) {
+    await dbEndShift(currentStore);
+    return { success: true } as unknown as T;
+  }
+
+  // Database Reset to Demo Seed
   if (cleanUrl.endsWith('/api/reset')) {
-    const defaultStore = getDefaultStore();
-    saveClientStore(defaultStore);
-    return getClientDashboardData(dateParam);
+    await dbResetDemoData(currentStore);
+    return { success: true } as unknown as T;
   }
 
-  return getClientDashboardData(dateParam);
-}
-
-let isClientOnlyMode = typeof window !== 'undefined' && (
-  sessionStorage.getItem('gym_client_only') === 'true' ||
-  window.location.hostname.includes('netlify.app') ||
-  window.location.hostname.includes('github.io') ||
-  window.location.hostname.includes('surge.sh') ||
-  window.location.hostname.includes('vercel.app') ||
-  window.location.hostname.includes('render.com') ||
-  window.location.hostname.includes('firebaseapp.com') ||
-  window.location.hostname.includes('web.app') ||
-  (!window.location.hostname.includes('run.app') && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-);
-
-export async function apiFetch<T = any>(url: string, options?: RequestInit): Promise<T> {
-  if (isClientOnlyMode) {
-    return handleClientFallbackRequest(url, options) as T;
-  }
-
-  const businessHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Business-Name': getStoredBusinessName(),
-    'X-Business-Pin': getStoredBusinessPin(),
-  };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-  const reqOptions: RequestInit = {
-    ...options,
-    signal: options?.signal || controller.signal,
-    headers: {
-      ...businessHeaders,
-      ...(options?.headers || {}),
-    },
-  };
-
-  try {
-    const res = await fetch(url, reqOptions);
-    clearTimeout(timeoutId);
-    const contentType = res.headers.get('content-type') || '';
-    const isJson = contentType.includes('application/json');
-
-    if (res.ok && isJson) {
-      try {
-        const data = await res.json();
-        if (data && data.store) {
-          try {
-            saveClientStoreLocally(data.store);
-          } catch {}
-        }
-        return data as T;
-      } catch (e) {
-        isClientOnlyMode = true;
-        if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-        const fallbackRes = handleClientFallbackRequest(url, options) as any;
-        if (fallbackRes && fallbackRes.store) {
-          try {
-            saveClientStoreLocally(fallbackRes.store);
-          } catch {}
-        }
-        return fallbackRes as T;
-      }
-    }
-
-    if (res.ok && !isJson) {
-      const text = await res.text();
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed && parsed.store) {
-          try {
-            saveClientStoreLocally(parsed.store);
-          } catch {}
-        }
-        return parsed as T;
-      } catch {
-        isClientOnlyMode = true;
-        if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-        const fallbackRes = handleClientFallbackRequest(url, options) as any;
-        if (fallbackRes && fallbackRes.store) {
-          try {
-            saveClientStoreLocally(fallbackRes.store);
-          } catch {}
-        }
-        return fallbackRes as T;
-      }
-    }
-
-    if (!res.ok) {
-      if (isJson) {
-        try {
-          const errorData = await res.json();
-          if (errorData) {
-            if (errorData.message || errorData.error) {
-              throw new Error(errorData.message || errorData.error);
-            }
-            return errorData as T;
-          }
-        } catch (e: any) {
-          if (e.message && e.message !== 'Unexpected end of JSON input') {
-            throw e;
-          }
-        }
-      }
-
-      isClientOnlyMode = true;
-      if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-      return handleClientFallbackRequest(url, options) as T;
-    }
-
-    return await res.json();
-  } catch (err: any) {
-    if (err && err.message) {
-      throw err;
-    }
-    isClientOnlyMode = true;
-    if (typeof window !== 'undefined') sessionStorage.setItem('gym_client_only', 'true');
-    return handleClientFallbackRequest(url, options) as T;
-  }
+  return { success: true } as unknown as T;
 }

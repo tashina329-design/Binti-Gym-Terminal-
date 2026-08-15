@@ -109,6 +109,8 @@ export interface MemberMatch {
   phone: string;
   plan: string;
   status: string;
+  planType?: string;
+  expirationDate?: string;
 }
 
 export interface RegisteredStaff {

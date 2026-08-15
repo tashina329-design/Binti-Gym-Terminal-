@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Activity, Zap } from 'lucide-react';
+import { Activity, Zap, CheckCircle2 } from 'lucide-react';
 import { DashboardData } from '../../types';
 
 interface ClassesTabProps {
@@ -12,6 +12,7 @@ export const ClassesTab: React.FC<ClassesTabProps> = ({ onRecordClass }) => {
   const [price, setPrice] = useState(6.00);
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const presets = [
     { name: 'Trampoline', price: 6.00, icon: '🧗' },
@@ -31,6 +32,7 @@ export const ClassesTab: React.FC<ClassesTabProps> = ({ onRecordClass }) => {
     if (!className.trim() || !clientName.trim() || price < 0) return;
 
     setLoading(true);
+    setSuccessMsg(null);
     try {
       await onRecordClass({
         className,
@@ -38,7 +40,9 @@ export const ClassesTab: React.FC<ClassesTabProps> = ({ onRecordClass }) => {
         amount: price,
         paymentMethod,
       });
+      setSuccessMsg(`Class ticket recorded for ${clientName} (${className} - $${price.toFixed(2)})!`);
       setClientName('');
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to record class pass: ' + (err.message || err));
     } finally {
@@ -48,6 +52,12 @@ export const ClassesTab: React.FC<ClassesTabProps> = ({ onRecordClass }) => {
 
   return (
     <div className="space-y-6">
+      {successMsg && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-xl flex items-center gap-3 text-emerald-400 font-semibold text-sm animate-fade-in shadow-lg">
+          <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+          <span>{successMsg}</span>
+        </div>
+      )}
       <div>
         <h3 className="text-base font-semibold text-slate-200 mb-1 flex items-center gap-2">
           <Activity className="w-4 h-4 text-purple-400" /> Fitness Classes

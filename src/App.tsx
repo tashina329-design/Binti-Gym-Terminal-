@@ -130,10 +130,23 @@ export default function App() {
     setCurrentBusinessName(bizName);
     setCurrentBusinessPin(pin);
     setCurrentStore(bizName);
-    localStorage.setItem('current_store_name', bizName);
-    localStorage.setItem('current_business_name', bizName);
-    localStorage.setItem('current_business_pin', pin);
+    try {
+      localStorage.setItem('current_store_name', bizName);
+      localStorage.setItem('current_business_name', bizName);
+      localStorage.setItem('current_business_pin', pin);
+    } catch {}
     setShowBusinessAuthModal(false);
+  };
+
+  const handleLogout = () => {
+    setCurrentBusinessName('');
+    setCurrentBusinessPin('');
+    try {
+      localStorage.removeItem('current_business_name');
+      localStorage.removeItem('current_business_pin');
+      localStorage.removeItem('current_store_name');
+    } catch {}
+    setShowBusinessAuthModal(true);
   };
 
   // Terminal Push Notifications State
@@ -610,13 +623,20 @@ export default function App() {
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Top Header */}
         <Header
-          selectedDate={selectedDate}
-          onResetToday={handleResetToday}
-          isRefreshing={isRefreshing}
-          onResetDatabase={handleResetDatabase}
+          viewDate={selectedDate}
+          isToday={selectedDate === getTodayIsoDate()}
+          isCheckinMode={isCheckinMode}
+          activeShift={activeShift}
+          notifications={notifications}
           currentStore={currentBusinessName || currentStore}
-          onSwitchStore={() => setShowBusinessAuthModal(true)}
           syncStatus={syncStatus}
+          onOpenShiftModal={() => setShowShiftModal(true)}
+          onLockTerminal={handleLogout}
+          onToggleCheckinMode={() => setIsCheckinMode(true)}
+          onRefresh={() => {
+            setIsRefreshing(true);
+            setTimeout(() => setIsRefreshing(false), 500);
+          }}
         />
 
         {/* Global Toolbar & Date Navigation */}
@@ -624,11 +644,12 @@ export default function App() {
           selectedDate={selectedDate}
           onDateChange={handleDateChange}
           onResetToday={handleResetToday}
-          activeShift={activeShift}
-          onOpenShiftModal={() => setShowShiftModal(true)}
-          onOpenEntranceCheckin={() => setIsCheckinMode(true)}
-          currentStore={currentBusinessName || currentStore}
-          onSwitchStore={() => setShowBusinessAuthModal(true)}
+          onResetDatabase={handleResetDatabase}
+          isRefreshing={isRefreshing}
+          onRefresh={() => {
+            setIsRefreshing(true);
+            setTimeout(() => setIsRefreshing(false), 500);
+          }}
         />
 
         {/* Shift Warning Banner if not started */}

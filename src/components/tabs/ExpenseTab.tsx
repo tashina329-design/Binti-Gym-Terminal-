@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, CheckCircle2 } from 'lucide-react';
 import { DashboardData } from '../../types';
 
 interface ExpenseTabProps {
@@ -12,12 +12,14 @@ export const ExpenseTab: React.FC<ExpenseTabProps> = ({ onRecordExpense }) => {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!description.trim() || !amount) return;
 
     setLoading(true);
+    setSuccessMsg(null);
     try {
       await onRecordExpense({
         category,
@@ -25,8 +27,10 @@ export const ExpenseTab: React.FC<ExpenseTabProps> = ({ onRecordExpense }) => {
         amount: parseFloat(amount) || 0,
         paymentMethod,
       });
+      setSuccessMsg(`Expense recorded! $${parseFloat(amount || '0').toFixed(2)} (${category}) added to outflow ledger.`);
       setDescription('');
       setAmount('');
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to record expense: ' + (err.message || err));
     } finally {
@@ -35,7 +39,13 @@ export const ExpenseTab: React.FC<ExpenseTabProps> = ({ onRecordExpense }) => {
   };
 
   return (
-    <div className="max-w-xl bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-lg">
+    <div className="max-w-xl bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-lg space-y-4">
+      {successMsg && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-xl flex items-center gap-3 text-emerald-400 font-semibold text-sm animate-fade-in shadow-lg">
+          <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
+          <span>{successMsg}</span>
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-4">
         <div className="w-9 h-9 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
           <DollarSign className="w-5 h-5" />

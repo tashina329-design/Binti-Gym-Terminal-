@@ -1426,3 +1426,139 @@ export async function dbResetDemoData(businessName: string) {
     timestamp: getBruneiFormattedTime(new Date(), true),
   });
 }
+
+// Backward-Compatibility Shims & Helpers
+
+/**
+ * Broadcast event across devices in real time via Firestore events collection.
+ */
+export async function broadcastLiveSync(
+  eventData?: SyncEventPayload,
+  _store?: GymDataStore,
+  businessName?: string
+): Promise<void> {
+  const biz = businessName || getStoredBusinessName() || 'Binti Gym';
+  if (eventData) {
+    await dbBroadcastEvent(biz, eventData);
+  }
+}
+
+/**
+ * Legacy subscribe alias for subscribeFirestoreBusiness
+ */
+export function subscribeLiveSync(
+  onUpdate: (dashboard: DashboardData, event?: SyncEventPayload, isRemote?: boolean) => void,
+  onStatusChange?: (status: 'connected' | 'reconnecting' | 'offline') => void,
+  businessName?: string,
+  viewDate?: string
+): () => void {
+  const biz = businessName || getStoredBusinessName() || 'Binti Gym';
+  return subscribeFirestoreBusiness(biz, onUpdate, onStatusChange, viewDate);
+}
+
+/**
+ * Fetches the entire GymDataStore from Firestore for the given business.
+ */
+export async function fetchCloudStore(businessName?: string): Promise<GymDataStore | null> {
+  try {
+    await ensureFirebaseAuth();
+    const biz = businessName || getStoredBusinessName() || 'Binti Gym';
+    const bizRef = getBusinessDocRef(biz);
+    const bizSnap = await getDoc(bizRef);
+
+    if (!bizSnap.exists()) {
+      return null;
+    }
+
+    const bizData = bizSnap.data();
+
+    // Fetch members subcollection
+    const membersSnap = await getDocs(getBusinessCollectionRef(biz, 'members'));
+    const members: Member[] = membersSnap.docs.map((d) => d.data() as Member);
+
+    // Fetch attendance subcollection
+    const attSnap = await getDocs(getBusinessCollectionRef(biz, 'attendance'));
+    const attendance = attSnap.docs.map((d) => d.data());
+
+    // Fetch sales subcollection
+    const salesSnap = await getDocs(getBusinessCollectionRef(biz, 'sales'));
+    const sales = salesSnap.docs.map((d) => d.data());
+
+    // Fetch expenses subcollection
+    const expSnap = await getDocs(getBusinessCollectionRef(biz, 'expenses'));
+    const expenses = expSnap.docs.map((d) => d.data());
+
+    // Fetch staff subcollection
+    const staffSnap = await getDocs(getBusinessCollectionRef(biz, 'staff'));
+    const registeredStaff: RegisteredStaff[] = staffSnap.docs.map((d) => d.data() as RegisteredStaff);
+
+    return {
+      members,
+      attendance,
+      sales,
+      expenses,
+      registeredStaff: registeredStaff.length > 0 ? registeredStaff : (bizData.registeredStaff || []),
+      activeShift: bizData.activeShift || null,
+      staffPin: bizData.pin || '1234',
+      availableStores: bizData.availableStores || ['Binti Gym'],
+    };
+  } catch (err) {
+    console.error('fetchCloudStore error:', err);
+    return null;
+  }
+}
+
+/**
+ * Local store compatibility methods
+ */
+export function loadClientStore(): GymDataStore {
+  try {
+    const raw = localStorage.getItem('gym_data_store_v1');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {
+    members: [],
+    attendance: [],
+    expenses: [],
+    sales: [],
+    registeredStaff: [],
+    activeShift: null,
+    staffPin: '1234',
+  };
+}
+
+export function saveClientStoreLocally(store: GymDataStore): void {
+  try {
+    localStorage.setItem('gym_data_store_v1', JSON.stringify(store));
+  } catch {}
+}
+
+export async function saveClientStore(
+  store: GymDataStore,
+  event?: SyncEventPayload,
+  businessName?: string
+): Promise<void> {
+  saveClientStoreLocally(store);
+  if (event) {
+    await broadcastLiveSync(event, store, businessName);
+  }
+}
+
+export function getClientDashboardData(
+  store: GymDataStore,
+  viewDateStr?: string
+): DashboardData {
+  return computeDashboardFromCollections(
+    viewDateStr || getBruneiTodayIsoDate(),
+    store.members || [],
+    store.attendance || [],
+    store.sales || [],
+    store.expenses || [],
+    store.registeredStaff || [],
+    store.activeShift || null,
+    store.staffPin || '1234',
+    store.availableStores || ['Binti Gym']
+  );
+}
+
+

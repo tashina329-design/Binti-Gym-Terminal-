@@ -19,8 +19,29 @@ import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
 import { BusinessAuthModal } from './components/BusinessAuthModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
-import { apiFetch, loadClientStore, saveClientStore, saveClientStoreLocally, getClientDashboardData, getBruneiTodayIsoDate } from './lib/api';
-import { subscribeLiveSync, broadcastLiveSync, fetchCloudStore, SyncEventPayload, GymDataStore } from './lib/firebaseSync';
+import {
+  subscribeFirestoreBusiness,
+  dbCheckInPhone,
+  dbCheckInId,
+  dbRecordWalkIn,
+  dbRecordPOS,
+  dbRecordClass,
+  dbRecordPTIn,
+  dbRecordPTOut,
+  dbRecordExpense,
+  dbRegisterMember,
+  dbRenewMember,
+  dbDeleteSale,
+  dbDeleteAttendance,
+  dbDeleteExpense,
+  dbDeleteMember,
+  dbStartShift,
+  dbEndShift,
+  dbResetDemoData,
+  fetchStoresFromCloud,
+  getBruneiTodayIsoDate,
+  SyncEventPayload,
+} from './lib/firebaseSync';
 
 import { DashboardData, Member, CheckInResponse, StaffShift, PushNotification } from './types';
 
@@ -86,6 +107,25 @@ export default function App() {
     return currentBusinessName || localStorage.getItem('current_store_name') || 'Binti Gym';
   });
 
+  const [availableStores, setAvailableStores] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('gym_available_stores');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    fetchStoresFromCloud().then((stores) => {
+      if (stores && stores.length > 0) {
+        setAvailableStores(stores);
+        try {
+          localStorage.setItem('gym_available_stores', JSON.stringify(stores));
+        } catch {}
+      }
+    });
+  }, []);
+
   const handleBusinessAuthenticated = (bizName: string, pin: string) => {
     setCurrentBusinessName(bizName);
     setCurrentBusinessPin(pin);
@@ -94,31 +134,7 @@ export default function App() {
     localStorage.setItem('current_business_name', bizName);
     localStorage.setItem('current_business_pin', pin);
     setShowBusinessAuthModal(false);
-
-    // Reload store data for this business from cloud Firestore
-    fetchCloudStore(bizName).then((cloudStore) => {
-      if (cloudStore) {
-        saveClientStoreLocally(cloudStore);
-        if (cloudStore.availableStores) {
-          setAvailableStores(cloudStore.availableStores);
-        }
-        if (cloudStore.activeShift !== undefined) {
-          setActiveShift(cloudStore.activeShift);
-        }
-        loadDashboard(selectedDate, cloudStore);
-      } else {
-        loadDashboard(selectedDate);
-      }
-    });
   };
-
-  const [availableStores, setAvailableStores] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('gym_available_stores');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
-  });
 
   // Terminal Push Notifications State
   const [notifications, setNotifications] = useState<PushNotification[]>([]);
@@ -160,15 +176,7 @@ export default function App() {
     }, 6000);
   };
 
-  const [activeShift, setActiveShift] = useState<StaffShift | null>(() => {
-    try {
-      const saved = localStorage.getItem('gym_active_shift');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  const [activeShift, setActiveShift] = useState<StaffShift | null>(null);
   const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
 
   // Quick renew modal state
@@ -207,77 +215,25 @@ export default function App() {
     viewDate: getTodayIsoDate(),
   });
 
-  // Check URL parameters for ?p=checkin
+  // Real-Time Firestore Single Source of Truth Subscription
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('p') === 'checkin') {
-      setIsCheckinMode(true);
-    }
-  }, []);
+    if (!currentStore) return;
 
-  // Fetch Dashboard Data
-  const loadDashboard = useCallback(async (dateToFetch?: string, overrideStore?: GymDataStore) => {
-    setIsRefreshing(true);
-    const dateQuery = dateToFetch || selectedDate;
-    try {
-      if (overrideStore) {
-        saveClientStoreLocally(overrideStore);
-        const instantData = getClientDashboardData(dateQuery, overrideStore);
-        setDashboardData(instantData);
-      }
-      const data: DashboardData = await apiFetch(`/api/dashboard?date=${dateQuery}`);
-      if (data) {
-        setDashboardData(data);
-      }
-    } catch (err) {
-      console.error('Error loading dashboard data:', err);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [selectedDate]);
-
-  // Initial fetch of central cloud database store on mount
-  useEffect(() => {
-    fetchCloudStore(currentBusinessName).then((cloudStore) => {
-      if (cloudStore) {
-        saveClientStoreLocally(cloudStore);
-        if (cloudStore.availableStores) {
-          setAvailableStores(cloudStore.availableStores);
+    const unsubscribe = subscribeFirestoreBusiness(
+      currentStore,
+      (liveDashboard: DashboardData, eventData?: SyncEventPayload, isRemote?: boolean) => {
+        setDashboardData(liveDashboard);
+        if (liveDashboard.store?.activeShift !== undefined) {
+          setActiveShift(liveDashboard.store.activeShift);
         }
-        if (cloudStore.activeShift !== undefined) {
-          setActiveShift(cloudStore.activeShift);
-        }
-        loadDashboard(selectedDate, cloudStore);
-      }
-    });
-  }, [selectedDate, loadDashboard, currentBusinessName]);
-
-  useEffect(() => {
-    loadDashboard(selectedDate);
-  }, [selectedDate, loadDashboard]);
-
-  // Real-Time Multi-Channel Live Sync & Cross-Device Listener
-  useEffect(() => {
-    const unsubscribe = subscribeLiveSync(
-      (eventData?: SyncEventPayload, isRemote?: boolean, remoteStore?: GymDataStore) => {
-        // Update local React state if remote store is passed
-        if (remoteStore) {
-          saveClientStoreLocally(remoteStore);
-          if (remoteStore.availableStores) {
-            setAvailableStores(remoteStore.availableStores);
-          }
-          if (remoteStore.activeShift !== undefined) {
-            setActiveShift(remoteStore.activeShift);
-          }
+        if (liveDashboard.store?.availableStores && liveDashboard.store.availableStores.length > 0) {
+          setAvailableStores(liveDashboard.store.availableStores);
         }
 
-        // Reload dashboard state with instant local computation
-        loadDashboard(selectedDate, remoteStore);
-
-        // If update came from another device/tab, play chime & display notification banner
+        // If change came from another device/terminal in real-time, play audio chime & show notification
         if (isRemote && eventData) {
-          const title = eventData.title || '⚡ Live Device Sync Alert';
-          const message = eventData.message || 'Data updated in real time from another device.';
+          const title = eventData.title || '⚡ Live Cloud Sync Alert';
+          const message = eventData.message || 'Data updated in real time from another terminal.';
           const timeStr =
             eventData.timestamp ||
             new Date().toLocaleTimeString('en-US', {
@@ -287,7 +243,6 @@ export default function App() {
               hour12: true,
             });
 
-          // Play audio chime on listening device
           playSelfCheckinNotificationSound(
             eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
           );
@@ -314,21 +269,11 @@ export default function App() {
       (status) => {
         setSyncStatus(status);
       },
-      currentBusinessName
+      selectedDate
     );
 
     return () => unsubscribe();
-  }, [selectedDate, loadDashboard, currentBusinessName]);
-
-  // Periodic Auto-refresh fallback every 30s
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!document.hidden) {
-        loadDashboard(selectedDate);
-      }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [selectedDate, loadDashboard]);
+  }, [currentStore, selectedDate]);
 
   // Handler functions
   const handleDateChange = (date: string) => {
@@ -341,16 +286,10 @@ export default function App() {
   };
 
   const handleResetDatabase = async () => {
-    if (!window.confirm('Reset database to standard demo seed records?')) return;
+    if (!window.confirm('Reset Firestore database to standard demo seed records?')) return;
     setIsRefreshing(true);
     try {
-      const data = await apiFetch('/api/reset', { method: 'POST' });
-      setDashboardData(data);
-      broadcastLiveSync({
-        type: 'reset',
-        title: '🔄 Database Reset',
-        message: 'System database was reset to standard demo seed records.',
-      }, loadClientStore());
+      await dbResetDemoData(currentStore);
     } catch (err: any) {
       alert('Error resetting database: ' + (err.message || err));
     } finally {
@@ -360,198 +299,109 @@ export default function App() {
 
   // Check-In API calls
   const handleCheckinPhone = async (phone: string): Promise<CheckInResponse> => {
-    const result: CheckInResponse = await apiFetch('/api/checkin/phone', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone }),
-    });
-    if (result.success && !result.multiple) {
-      loadDashboard();
-      const matchedMember = result.members?.[0];
-      const name = matchedMember?.fullName || 'Member';
-      const timeStr = new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      });
-
-      broadcastLiveSync({
-        type: 'checkin',
-        title: '🔔 Terminal Phone Check-In',
-        message: `${name} checked in via terminal using Phone (${phone})!`,
-        timestamp: timeStr,
-        memberName: name,
-        memberId: matchedMember?.memberId,
-      }, loadClientStore());
-
-      triggerSelfCheckinNotification(
-        '🔔 Self Check-In Alert',
-        `${name} checked in via terminal using Phone (${phone})!`,
-        name,
-        matchedMember?.memberId
-      );
+    try {
+      const result = await dbCheckInPhone(currentStore, phone);
+      if (result.success && !result.multiple) {
+        const matchedMember = result.members?.[0];
+        const name = matchedMember?.fullName || 'Member';
+        triggerSelfCheckinNotification(
+          '🔔 Self Check-In Alert',
+          `${name} checked in via terminal using Phone (${phone})!`,
+          name,
+          matchedMember?.memberId
+        );
+      }
+      return result;
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Check-in failed.' };
     }
-    return result;
   };
 
   const handleCheckinId = async (memberId: string): Promise<CheckInResponse> => {
-    const result: CheckInResponse = await apiFetch('/api/checkin/id', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ memberId }),
-    });
-    if (result.success) {
-      loadDashboard();
-      const timeStr = new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      });
-
-      broadcastLiveSync({
-        type: 'checkin',
-        title: '🔔 Terminal Member Check-In',
-        message: `Member #${memberId} successfully checked in at terminal!`,
-        timestamp: timeStr,
-        memberId: memberId,
-      }, loadClientStore());
-
-      triggerSelfCheckinNotification(
-        '🔔 Self Check-In Alert',
-        `Member #${memberId} successfully checked in at Binti Gym terminal!`,
-        `Member #${memberId}`,
-        memberId
-      );
+    try {
+      const result = await dbCheckInId(currentStore, memberId);
+      if (result.success) {
+        triggerSelfCheckinNotification(
+          '🔔 Self Check-In Alert',
+          `Member #${memberId} successfully checked in at Binti Gym terminal!`,
+          `Member #${memberId}`,
+          memberId
+        );
+      }
+      return result;
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Check-in failed.' };
     }
-    return result;
   };
 
-  // Transaction API calls
+  // Transaction Actions (Direct Firestore Subcollection Writes)
   const handleRecordWalkIn = async (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/walkin?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordWalkIn(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    const timeStr = new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    });
-
-    broadcastLiveSync({
-      type: 'walkin',
-      title: '🎟️ Walk-In Pass Issued',
-      message: `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.00})!`,
-      timestamp: timeStr,
-      memberName: data.name,
-    }, loadClientStore());
 
     if (isCheckinMode) {
       triggerSelfCheckinNotification(
         '🔔 Walk-In Pass Check-In Alert',
-        `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.00})!`,
+        `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
         data.name
       );
     } else {
       setActiveTab('sales');
     }
-    return updated;
+    return dashboardData;
   };
 
   const handleRecordPOS = async (data: { itemName: string; qty: number; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/pos?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordPOS(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'pos',
-      title: '🛒 POS Item Sold',
-      message: `Sold ${data.itemName || 'Item'} (x${data.qty || 1}) - $${data.amount}`,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleRecordClass = async (data: { className: string; clientName: string; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/class?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordClass(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'class',
-      title: '🧘 Class Pass Sold',
-      message: `Class pass for ${data.className || 'Class'} recorded for ${data.clientName || 'Client'}`,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleRecordPTIn = async (data: { trainerName: string; clientName: string; sessions: string; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/pt/in?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordPTIn(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'pt',
-      title: '💪 Personal Training Package',
-      message: `PT Package: ${data.clientName} with Coach ${data.trainerName}`,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleRecordPTOut = async (data: { trainerName: string; description: string; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/pt/out?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordPTOut(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'pt',
-      title: '💸 PT Payout Recorded',
-      message: `PT payout for Coach ${data.trainerName}: $${data.amount}`,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleRecordExpense = async (data: { category: string; description: string; amount: number; paymentMethod: string }) => {
-    const updated: DashboardData = await apiFetch(`/api/expense?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRecordExpense(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'expense',
-      title: '🧾 Expense Logged',
-      message: `Expense logged: ${data.description || data.category} ($${data.amount})`,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleRegisterMember = async (data: {
@@ -563,22 +413,13 @@ export default function App() {
     endDate: string;
     paymentMethod: string;
   }) => {
-    const updated: DashboardData = await apiFetch(`/api/members/register?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRegisterMember(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'membership',
-      title: '⭐ New Member Registered',
-      message: `Registered new member ${data.name} (${data.planType})`,
-      memberName: data.name,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   const handleConfirmRenew = async (data: {
@@ -587,22 +428,13 @@ export default function App() {
     price: number;
     paymentMethod: string;
   }) => {
-    const updated: DashboardData = await apiFetch(`/api/members/renew?date=${selectedDate}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, viewDate: selectedDate, staff: activeShift?.staffName || 'Duty Staff' }),
+    await dbRenewMember(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
     });
-    setDashboardData(updated);
-
-    broadcastLiveSync({
-      type: 'membership',
-      title: '🔄 Membership Renewed',
-      message: `Renewed membership for #${data.memberId} (${data.planType})`,
-      memberId: data.memberId,
-    }, loadClientStore());
-
     setActiveTab('sales');
-    return updated;
+    return dashboardData;
   };
 
   // Deletion Handlers triggering custom confirmation modal
@@ -650,72 +482,29 @@ export default function App() {
     setDeleteTarget(null);
 
     try {
-      let endpoint = '';
-      let body: any = { date: selectedDate, viewDate: selectedDate };
-
       if (type === 'sale') {
-        endpoint = '/api/sales/delete';
-        body = { ...body, ...data };
+        await dbDeleteSale(currentStore, data);
       } else if (type === 'attendance') {
-        endpoint = '/api/attendance/delete';
-        body = { ...body, ...data };
+        await dbDeleteAttendance(currentStore, data);
       } else if (type === 'expense') {
-        endpoint = '/api/expense/delete';
-        body = { ...body, ...data };
+        await dbDeleteExpense(currentStore, data);
       } else if (type === 'member') {
-        endpoint = '/api/members/delete';
-        body = { ...body, memberId: data.memberId || data };
+        await dbDeleteMember(currentStore, data.memberId || data);
       }
-
-      const updated: DashboardData = await apiFetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      setDashboardData(updated);
-      broadcastLiveSync(undefined, loadClientStore());
     } catch (err: any) {
-      console.error('Delete error:', err);
+      console.error('Delete error in Firestore:', err);
     }
   };
 
   const handleStartShift = async (shift: StaffShift) => {
     setActiveShift(shift);
-    localStorage.setItem('gym_active_shift', JSON.stringify(shift));
-    const store = loadClientStore();
-    store.activeShift = shift;
-    saveClientStore(store, {
-      type: 'shift',
-      title: '🟢 Duty Shift Started',
-      message: `${shift.staffName} started shift (${shift.shiftTitle || 'Duty Shift'})!`,
-    });
-    try {
-      await apiFetch('/api/staff/shift/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shift }),
-      });
-    } catch (e) {}
+    await dbStartShift(currentStore, shift);
     setShowShiftModal(false);
   };
 
   const handleEndShift = async () => {
     setActiveShift(null);
-    localStorage.removeItem('gym_active_shift');
-    const store = loadClientStore();
-    store.activeShift = null;
-    saveClientStore(store, {
-      type: 'shift',
-      title: '🔴 Duty Shift Ended',
-      message: 'Active duty shift ended.',
-    });
-    try {
-      await apiFetch('/api/staff/shift/end', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (e) {}
+    await dbEndShift(currentStore);
     setShowShiftModal(false);
   };
 
@@ -744,7 +533,7 @@ export default function App() {
                     {activePushBanner.message}
                   </p>
                   <span className="inline-block text-[10px] font-semibold text-emerald-400 mt-1">
-                    ✓ Logged to Binti Gym Operational Records
+                    ✓ Logged to Firestore Cloud Database
                   </span>
                 </div>
               </div>
@@ -802,7 +591,7 @@ export default function App() {
                   {activePushBanner.message}
                 </p>
                 <span className="inline-block text-[10px] font-semibold text-emerald-400 mt-1">
-                  ✓ Logged to Operational Records
+                  ✓ Synced across all terminal screens
                 </span>
               </div>
             </div>
@@ -817,35 +606,61 @@ export default function App() {
         </div>
       )}
 
-      <div className="max-w-[1600px] w-full mx-auto space-y-6">
-        {/* Header */}
+      {/* Main Container */}
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Top Header */}
         <Header
-          viewDate={dashboardData.viewDate || selectedDate}
-          isToday={isToday}
-          isCheckinMode={isCheckinMode}
-          activeShift={activeShift}
-          notifications={notifications}
+          selectedDate={selectedDate}
+          onResetToday={handleResetToday}
+          isRefreshing={isRefreshing}
+          onResetDatabase={handleResetDatabase}
           currentStore={currentBusinessName || currentStore}
+          onSwitchStore={() => setShowBusinessAuthModal(true)}
           syncStatus={syncStatus}
-          onOpenShiftModal={() => setShowShiftModal(true)}
-          onLockTerminal={() => setIsCheckinMode(true)}
-          onToggleCheckinMode={() => setIsCheckinMode(true)}
-          onRefresh={() => loadDashboard(selectedDate)}
-          onOpenStoreLogin={() => setShowBusinessAuthModal(true)}
         />
 
-        {/* Controls Toolbar */}
+        {/* Global Toolbar & Date Navigation */}
         <Toolbar
           selectedDate={selectedDate}
           onDateChange={handleDateChange}
-          onRefresh={() => loadDashboard(selectedDate)}
           onResetToday={handleResetToday}
-          onResetDatabase={handleResetDatabase}
-          isRefreshing={isRefreshing}
+          activeShift={activeShift}
+          onOpenShiftModal={() => setShowShiftModal(true)}
+          onOpenEntranceCheckin={() => setIsCheckinMode(true)}
+          currentStore={currentBusinessName || currentStore}
+          onSwitchStore={() => setShowBusinessAuthModal(true)}
         />
 
-        {/* Real-time Metrics Grid (Gross Sales, Expenses, Net Profit, Check-Ins, Expiring Soon) */}
-        <StatsGrid data={dashboardData} />
+        {/* Shift Warning Banner if not started */}
+        {!activeShift && (
+          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-amber-200 backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-amber-100">No Active Staff Shift Started</p>
+                <p className="text-xs text-amber-300/80">
+                  Transactions will be logged under generic "Duty Staff". Start a shift to track cashier duty & starting float.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowShiftModal(true)}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-950/50 transition shrink-0"
+            >
+              <Play className="w-4 h-4 fill-slate-950" /> Start Duty Shift
+            </button>
+          </div>
+        )}
+
+        {/* Operational Statistics Grid */}
+        <StatsGrid
+          data={dashboardData}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        />
 
         {/* Navigation Tabs Bar (Positioned between Gross Sales & Payment Method Summary) */}
         <NavigationTabs
@@ -921,6 +736,7 @@ export default function App() {
         onEndShift={handleEndShift}
         onClose={() => setShowShiftModal(false)}
       />
+
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in">

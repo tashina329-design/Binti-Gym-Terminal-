@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Building2, Lock, KeyRound, ArrowRight, ShieldCheck, PlusCircle, LogIn, Store, Sparkles } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { authenticateCloudBusinessStore, fetchStoresFromCloud, broadcastLiveSync } from '../lib/firebaseSync';
+import { authenticateCloudBusinessStore, fetchStoresFromCloud } from '../lib/firebaseSync';
 
 interface BusinessAuthModalProps {
   isOpen: boolean;
@@ -112,7 +112,7 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
 
     setLoading(true);
     try {
-      // 1. Direct Cloud Firestore authentication as primary cross-device source of truth
+      // Direct Cloud Firestore authentication as primary cross-device source of truth
       const cloudRes = await authenticateCloudBusinessStore(activeName, pin, mode);
 
       if (cloudRes.success) {
@@ -121,66 +121,13 @@ export const BusinessAuthModal: React.FC<BusinessAuthModalProps> = ({
         localStorage.setItem('current_business_pin', pin);
         localStorage.setItem('current_store_name', finalName);
 
-        if (cloudRes.store) {
-          try {
-            localStorage.setItem('gym_data_store_v1', JSON.stringify(cloudRes.store));
-          } catch {}
-        }
-
-        // Notify other devices via real-time broadcast
-        broadcastLiveSync(
-          {
-            type: 'reset',
-            title: '🏢 Terminal Connected',
-            message: `Terminal connected to ${finalName}`,
-          },
-          cloudRes.store,
-          finalName
-        );
-
-        // Notify server backend if present
-        try {
-          const endpoint = mode === 'register' ? '/api/stores/register' : '/api/stores/login';
-          await apiFetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: finalName, pin }),
-          });
-        } catch {}
-
         onAuthenticated(finalName, pin);
         return;
       } else {
         setError(cloudRes.message || 'Authentication failed. Please check your 4-digit PIN code.');
       }
     } catch (err: any) {
-      // Fallback try API fetch
-      try {
-        const endpoint = mode === 'register' ? '/api/stores/register' : '/api/stores/login';
-        const res = await apiFetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: activeName, pin }),
-        });
-
-        if (res && res.success) {
-          localStorage.setItem('current_business_name', activeName);
-          localStorage.setItem('current_business_pin', pin);
-          localStorage.setItem('current_store_name', activeName);
-          if (res.store) {
-            try {
-              localStorage.setItem('gym_data_store_v1', JSON.stringify(res.store));
-            } catch {}
-          }
-          broadcastLiveSync(undefined, res.store, activeName);
-          onAuthenticated(activeName, pin);
-          return;
-        } else {
-          setError(res?.message || 'Authentication failed. Please check your Business Name and PIN.');
-        }
-      } catch (err2: any) {
-        setError(err2?.message || 'Connection error. Please try again.');
-      }
+      setError(err?.message || 'Connection error. Please check your internet connection.');
     } finally {
       setLoading(false);
     }

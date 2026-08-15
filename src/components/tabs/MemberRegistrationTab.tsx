@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Zap, Trash2 } from 'lucide-react';
+import { Search, UserPlus, Zap, Trash2, CheckCircle2 } from 'lucide-react';
 import { DashboardData, Member } from '../../types';
 
 interface MemberRegistrationTabProps {
@@ -40,6 +40,7 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   const [endDate, setEndDate] = useState(nextMonthStr);
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handlePlanChange = (plan: string) => {
     setPlanType(plan);
@@ -51,6 +52,7 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
     if (!name.trim() || !phone.trim() || price < 0) return;
 
     setLoading(true);
+    setSuccessMsg(null);
     try {
       await onRegisterMember({
         name,
@@ -61,8 +63,10 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
         endDate,
         paymentMethod,
       });
+      setSuccessMsg(`Member registered! ${name} (${planType} - $${price.toFixed(2)}) is now active.`);
       setName('');
       setPhone('');
+      setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to register member: ' + (err.message || err));
     } finally {

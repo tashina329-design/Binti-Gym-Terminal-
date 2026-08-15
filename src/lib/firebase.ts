@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
-import { initializeFirestore, getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, Firestore } from 'firebase/firestore';
 import configFile from '../../firebase-applet-config.json';
 
 export const firebaseConfig = configFile;
@@ -8,25 +8,9 @@ export const firebaseConfig = configFile;
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 
-// Let the Firebase SDK automatically choose the most reliable transport for the
-// current network. This is safer than forcing long-polling on every browser and
-// fixes cases where a browser reports Firestore as "client is offline" even while
-// normal internet access is available.
-let firestoreInstance: Firestore;
-try {
-  firestoreInstance = initializeFirestore(
-    app,
-    {
-      experimentalAutoDetectLongPolling: true,
-      useFetchStreams: false,
-    },
-    databaseId
-  );
-} catch {
-  firestoreInstance = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
-}
-
-export const db: Firestore = firestoreInstance;
+// Use the standard Firestore client. Do not force a transport here; Firebase
+// automatically selects the connection supported by the current browser/network.
+export const db: Firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 export const auth = getAuth(app);
 
 let authInitPromise: Promise<User | null> | null = null;
@@ -46,12 +30,12 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
       resolve(user);
     };
 
-    // Auth is optional for the current Firestore rules. Do not make a slow Auth
-    // request prevent the app from reaching Firestore.
+    // Authentication is optional under the current Firestore rules. Never make
+    // a slow Auth request prevent the Firestore listeners from starting.
     const fallbackTimer = setTimeout(() => {
-      console.warn('Firebase Auth timed out; continuing without Auth.');
+      console.warn('Firebase Auth timed out; continuing with Firestore access.');
       finish(null);
-    }, 2000);
+    }, 2500);
 
     unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (settled) return;

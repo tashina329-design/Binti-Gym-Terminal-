@@ -1,12 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
-import {
-  initializeFirestore,
-  getFirestore,
-  Firestore,
-  doc,
-  getDoc,
-} from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
 import configFile from '../../firebase-applet-config.json';
 
 export const firebaseConfig = configFile;
@@ -14,22 +8,21 @@ export const firebaseConfig = configFile;
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 
-// Use long-polling for Firestore. This is intentionally enabled for the terminal
-// because some Wi-Fi/mobile networks block or interfere with Firestore's default
-// WebChannel transport. Long-polling is slower but much more reliable across
-// different phones, tablets and PCs/networks.
+// Let the Firebase SDK automatically choose the most reliable transport for the
+// current network. This is safer than forcing long-polling on every browser and
+// fixes cases where a browser reports Firestore as "client is offline" even while
+// normal internet access is available.
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: true,
       useFetchStreams: false,
     },
     databaseId
   );
 } catch {
-  // The Firebase app may already have initialized Firestore elsewhere.
   firestoreInstance = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 }
 
@@ -53,15 +46,17 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
       resolve(user);
     };
 
-    // Authentication is not required by the current Firestore rules, so never
-    // allow a Firebase Auth problem to block Firestore synchronization.
+    // Auth is optional for the current Firestore rules. Do not make a slow Auth
+    // request prevent the app from reaching Firestore.
     const fallbackTimer = setTimeout(() => {
-      console.warn('Firebase Auth unavailable; continuing with Firestore access.');
+      console.warn('Firebase Auth timed out; continuing without Auth.');
       finish(null);
-    }, 1500);
+    }, 2000);
 
     unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (settled) return;
       clearTimeout(fallbackTimer);
+
       if (user) {
         finish(user);
         return;
@@ -71,7 +66,7 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
         const cred = await signInAnonymously(auth);
         finish(cred.user);
       } catch (err) {
-        console.warn('Firebase anonymous auth unavailable; Firestore sync will continue:', err);
+        console.warn('Anonymous Firebase Auth unavailable; continuing with Firestore:', err);
         finish(null);
       }
     });
@@ -80,15 +75,6 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
   return authInitPromise;
 }
 
-// Warm up the Firebase session without making app startup depend on Auth.
-ensureFirebaseAuth()
-  .then((user) => {
-    if (user) {
-      console.log('Firebase Auth initialized for terminal session uid:', user.uid);
-    } else {
-      console.log('Firebase terminal session running without Auth; Firestore remains enabled.');
-    }
-  })
-  .catch((err) => {
-    console.warn('Firebase auth initialization warning:', err);
-  });
+ensureFirebaseAuth().catch((err) => {
+  console.warn('Firebase auth initialization warning:', err);
+});

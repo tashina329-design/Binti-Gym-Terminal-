@@ -1,13 +1,25 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, Firestore } from 'firebase/firestore';
 import configFile from '../../firebase-applet-config.json';
 
-export const firebaseConfig = configFile;
+// Support both static configuration and Vercel/Vite environment variables
+const env = typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : ({} as any);
+
+export const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || configFile?.apiKey || 'AIzaSyBZSZqX6mDucE2pAeSATjxoPF3Lrw1K0iE',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || configFile?.authDomain || 'gen-lang-client-0329117938.firebaseapp.com',
+  projectId: env.VITE_FIREBASE_PROJECT_ID || configFile?.projectId || 'gen-lang-client-0329117938',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || configFile?.storageBucket || 'gen-lang-client-0329117938.firebasestorage.app',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || configFile?.messagingSenderId || '368231596957',
+  appId: env.VITE_FIREBASE_APP_ID || configFile?.appId || '1:368231596957:web:22393ebc9b7ffb85a1e574',
+  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || (configFile as any)?.firestoreDatabaseId || 'ai-studio-remixremixstaffp-b8f5b69f-e55f-4e3e-ba5c-babddac50c2d',
+};
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
+const rawDbId = firebaseConfig.firestoreDatabaseId;
+const databaseId = rawDbId && rawDbId !== '(default)' && rawDbId !== 'default' ? rawDbId : undefined;
 
 export const db: Firestore = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 export const auth = getAuth(app);
@@ -27,6 +39,7 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
       resolve(user);
     };
 
+    // 2-second timeout to prevent any blockage on third-party hosts or restricted domains
     const fallbackTimer = setTimeout(() => {
       finish(auth.currentUser || null);
     }, 2000);
@@ -39,8 +52,9 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
         try {
           const cred = await signInAnonymously(auth);
           finish(cred.user);
-        } catch (err) {
-          console.warn('Firebase anonymous auth notice:', err);
+        } catch (err: any) {
+          // Non-fatal warning on unauthorized domains like vercel.app
+          console.warn('Firebase anonymous auth status (Firestore continues unaffected):', err?.message || err);
           finish(null);
         }
       }
@@ -51,13 +65,10 @@ export async function ensureFirebaseAuth(): Promise<User | null> {
 }
 
 // Automatically ensure authenticated session on app initialization
-ensureFirebaseAuth().then((user) => {
-  if (user) {
-    console.log('Firebase Auth initialized for terminal session uid:', user.uid);
-  }
-}).catch((err) => {
+ensureFirebaseAuth().catch((err) => {
   console.warn('Firebase auth initialization warning:', err);
 });
+
 
 
 

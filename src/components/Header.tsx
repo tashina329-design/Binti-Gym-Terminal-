@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dumbbell, RefreshCw, QrCode, Monitor, UserCheck, Bell, X, CheckCircle2, Lock, LogOut, Building2, WifiOff } from 'lucide-react';
+import { Dumbbell, RefreshCw, QrCode, Monitor, UserCheck, Bell, X, CheckCircle2, Lock, LogOut, WifiOff } from 'lucide-react';
 import { StaffShift, PushNotification } from '../types';
 import { getBruneiFormattedDate } from '../lib/api';
 
@@ -15,7 +15,6 @@ interface HeaderProps {
   onLockTerminal: () => void;
   onToggleCheckinMode: () => void;
   onRefresh: () => void;
-  onOpenStoreLogin?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,7 +29,6 @@ export const Header: React.FC<HeaderProps> = ({
   onLockTerminal,
   onToggleCheckinMode,
   onRefresh,
-  onOpenStoreLogin,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -50,18 +48,6 @@ export const Header: React.FC<HeaderProps> = ({
           </h1>
           <p className="text-xs text-slate-400">Store Operations & Daily Financial Ledger</p>
         </div>
-
-        {/* Store Terminal Login / Switcher Button */}
-        {onOpenStoreLogin && (
-          <button
-            onClick={onOpenStoreLogin}
-            className="ml-0 sm:ml-1 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border bg-slate-900 hover:bg-slate-800 text-emerald-300 border-emerald-500/30 transition-all shadow-sm cursor-pointer"
-            title="Switch Store or Log into Another Store Terminal"
-          >
-            <Building2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Store Login</span>
-          </button>
-        )}
 
         {/* Working Staff Shift Status Badge */}
         <button

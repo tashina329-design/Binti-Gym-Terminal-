@@ -40,6 +40,8 @@ import {
   dbResetDemoData,
   fetchStoresFromCloud,
   getBruneiTodayIsoDate,
+  getStoredActiveShift,
+  saveStoredActiveShift,
   SyncEventPayload,
 } from './lib/firebaseSync';
 
@@ -189,7 +191,7 @@ export default function App() {
     }, 6000);
   };
 
-  const [activeShift, setActiveShift] = useState<StaffShift | null>(null);
+  const [activeShift, setActiveShift] = useState<StaffShift | null>(() => getStoredActiveShift(currentStore));
   const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
   const [dismissShiftBanner, setDismissShiftBanner] = useState<boolean>(false);
 
@@ -348,13 +350,89 @@ export default function App() {
     }
   };
 
-  // Transaction Actions (Direct Firestore Subcollection Writes)
-  const handleRecordWalkIn = async (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => {
-    await dbRecordWalkIn(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
+  // Optimistic UI updates helper for immediate 0ms responsiveness
+  const addOptimisticSale = (sale: any) => {
+    setDashboardData((prev) => {
+      const newTodaySales = [sale, ...prev.todaySales];
+      const amount = Number(sale.amount) || 0;
+      const isIncome = sale.category !== 'PT Out';
+
+      const newTotalRevenue = isIncome ? prev.totalRevenue + amount : prev.totalRevenue;
+      const newNetIncome = prev.netIncome + (isIncome ? amount : -amount);
+
+      let newCashIn = prev.cashIn;
+      let newBaiduriIn = prev.baiduriIn;
+      let newBibdIn = prev.bibdIn;
+
+      if (sale.paymentMethod === 'Cash') newCashIn += amount;
+      if (sale.paymentMethod === 'Baiduri' || sale.paymentMethod === 'Card') newBaiduriIn += amount;
+      if (sale.paymentMethod === 'BIBD' || sale.paymentMethod === 'Online') newBibdIn += amount;
+
+      let posSalesTotal = prev.posSalesTotal;
+      let classSalesTotal = prev.classSalesTotal;
+      let ptSalesTotal = prev.ptSalesTotal;
+      let ptPayoutTotal = prev.ptPayoutTotal;
+      let walkInSalesTotal = prev.walkInSalesTotal;
+      let membershipSalesTotal = prev.membershipSalesTotal;
+
+      if (sale.category === 'POS') posSalesTotal += amount;
+      else if (sale.category === 'Class') classSalesTotal += amount;
+      else if (sale.category === 'PT In') ptSalesTotal += amount;
+      else if (sale.category === 'PT Out') ptPayoutTotal += amount;
+      else if (sale.category === 'Walk-In') walkInSalesTotal += amount;
+      else if (sale.category === 'Membership' || sale.category === 'Renewal') membershipSalesTotal += amount;
+
+      return {
+        ...prev,
+        todaySales: newTodaySales,
+        totalRevenue: newTotalRevenue,
+        netIncome: newNetIncome,
+        cashIn: newCashIn,
+        baiduriIn: newBaiduriIn,
+        bibdIn: newBibdIn,
+        posSalesTotal,
+        classSalesTotal,
+        ptSalesTotal,
+        ptPayoutTotal,
+        walkInSalesTotal,
+        membershipSalesTotal,
+      };
     });
+  };
+
+  const addOptimisticExpense = (expense: any) => {
+    setDashboardData((prev) => {
+      const newTodayExpenses = [expense, ...prev.todayExpenses];
+      const amount = Number(expense.amount) || 0;
+      const newTotalExpenses = prev.totalExpenses + amount;
+      const newNetIncome = prev.netIncome - amount;
+      const newCashOut = expense.paymentMethod === 'Cash' ? prev.cashOut + amount : prev.cashOut;
+
+      return {
+        ...prev,
+        todayExpenses: newTodayExpenses,
+        totalExpenses: newTotalExpenses,
+        netIncome: newNetIncome,
+        cashOut: newCashOut,
+      };
+    });
+  };
+
+  // Transaction Actions (Direct Firestore Subcollection Writes with 0ms Optimistic UI)
+  const handleRecordWalkIn = async (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'Walk-In',
+      customer: data.name ? `${data.name} (Walk-in)` : 'Walk-In Guest',
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
 
     if (isCheckinMode) {
       triggerSelfCheckinNotification(
@@ -362,52 +440,158 @@ export default function App() {
         `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
         data.name
       );
+    } else {
+      setActiveTab('sales');
     }
+
+    dbRecordWalkIn(currentStore, {
+      ...data,
+      viewDate: selectedDate,
+      staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync walk-in to cloud:', err);
+    });
+
     return dashboardData;
   };
 
   const handleRecordPOS = async (data: { itemName: string; qty: number; amount: number; paymentMethod: string }) => {
-    await dbRecordPOS(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'POS',
+      customer: `${data.itemName} x${data.qty}`,
+      itemName: data.itemName,
+      qty: Number(data.qty) || 1,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRecordPOS(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync POS sale to cloud:', err);
     });
+
     return dashboardData;
   };
 
   const handleRecordClass = async (data: { className: string; clientName: string; amount: number; paymentMethod: string }) => {
-    await dbRecordClass(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'Class',
+      customer: `${data.clientName} (${data.className})`,
+      className: data.className,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRecordClass(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync class sale to cloud:', err);
     });
+
     return dashboardData;
   };
 
   const handleRecordPTIn = async (data: { trainerName: string; clientName: string; sessions: string; amount: number; paymentMethod: string }) => {
-    await dbRecordPTIn(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'PT In',
+      customer: `${data.clientName} (Coach ${data.trainerName})`,
+      trainerName: data.trainerName,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRecordPTIn(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync PT sale to cloud:', err);
     });
+
     return dashboardData;
   };
 
   const handleRecordPTOut = async (data: { trainerName: string; description: string; amount: number; paymentMethod: string }) => {
-    await dbRecordPTOut(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'PT Out',
+      customer: `Payout: Coach ${data.trainerName}`,
+      trainerName: data.trainerName,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRecordPTOut(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync PT payout to cloud:', err);
     });
+
     return dashboardData;
   };
 
   const handleRecordExpense = async (data: { category: string; description: string; amount: number; paymentMethod: string }) => {
-    await dbRecordExpense(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optExp = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: data.category,
+      description: data.description,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.amount) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticExpense(optExp);
+    setActiveTab('sales');
+
+    dbRecordExpense(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync expense to cloud:', err);
     });
+
     return dashboardData;
   };
 
@@ -420,11 +604,47 @@ export default function App() {
     endDate: string;
     paymentMethod: string;
   }) => {
-    await dbRegisterMember(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optMemberId = 'MEM' + String(Math.floor(1000 + Math.random() * 9000));
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'Membership',
+      customer: `${data.name} (#${optMemberId} - ${data.planType})`,
+      memberId: optMemberId,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.price) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    setDashboardData((prev) => ({
+      ...prev,
+      members: [
+        {
+          memberId: optMemberId,
+          name: data.name,
+          phone: data.phone,
+          plan: data.planType,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          status: 'active' as const,
+        },
+        ...prev.members,
+      ],
+    }));
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRegisterMember(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync member registration to cloud:', err);
     });
+
     return dashboardData;
   };
 
@@ -434,11 +654,30 @@ export default function App() {
     price: number;
     paymentMethod: string;
   }) => {
-    await dbRenewMember(currentStore, {
+    const now = new Date();
+    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const optSale = {
+      id: 'opt_' + Date.now(),
+      timestamp,
+      category: 'Renewal',
+      customer: `Renewal #${data.memberId} (${data.planType})`,
+      memberId: data.memberId,
+      paymentMethod: data.paymentMethod || 'Cash',
+      amount: Number(data.price) || 0,
+      staff: activeShift?.staffName || 'Duty Staff',
+    };
+
+    addOptimisticSale(optSale);
+    setActiveTab('sales');
+
+    dbRenewMember(currentStore, {
       ...data,
       viewDate: selectedDate,
       staff: activeShift?.staffName || 'Duty Staff',
+    }).catch((err) => {
+      console.error('Failed to sync renewal to cloud:', err);
     });
+
     return dashboardData;
   };
 
@@ -503,14 +742,24 @@ export default function App() {
 
   const handleStartShift = async (shift: StaffShift) => {
     setActiveShift(shift);
-    await dbStartShift(currentStore, shift);
+    saveStoredActiveShift(shift, currentStore);
     setShowShiftModal(false);
+    try {
+      await dbStartShift(currentStore, shift);
+    } catch (err) {
+      console.warn('Shift sync warning:', err);
+    }
   };
 
   const handleEndShift = async () => {
     setActiveShift(null);
-    await dbEndShift(currentStore);
+    saveStoredActiveShift(null, currentStore);
     setShowShiftModal(false);
+    try {
+      await dbEndShift(currentStore);
+    } catch (err) {
+      console.warn('End shift sync warning:', err);
+    }
   };
 
   // Standalone Customer Entrance Check-In Terminal Mode

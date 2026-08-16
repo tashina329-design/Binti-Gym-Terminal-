@@ -19,7 +19,7 @@ export const BRUNEI_TIMEZONE = 'Asia/Brunei';
 
 export interface SyncEventPayload {
   deviceId?: string;
-  type?: 'checkin' | 'walkin' | 'pos' | 'class' | 'pt' | 'membership' | 'shift' | 'expense' | 'reset';
+  type?: 'checkin' | 'walkin' | 'pos' | 'class' | 'pt' | 'membership' | 'shift' | 'expense' | 'reset' | 'expired' | 'blocked' | 'info';
   title?: string;
   message?: string;
   timestamp?: string;
@@ -952,20 +952,15 @@ export function matchesFullPhoneNumber(registeredPhone: string, inputPhone: stri
   if (!regDigits || !inDigits) return false;
   if (regDigits === inDigits) return true;
 
-  // Compare full 7-digit local numbers even if prefixed with +673 or 0
-  if (regDigits.length >= 7 && inDigits.length >= 7) {
-    const regSuffix = regDigits.slice(-7);
-    const inSuffix = inDigits.slice(-7);
-    if (regSuffix === inSuffix) {
-      const regPrefix = regDigits.slice(0, -7);
-      const inPrefix = inDigits.slice(0, -7);
-      const isValidPrefix = (p: string) => p === '' || p === '673' || p === '0' || p === '0673';
-      if (isValidPrefix(regPrefix) && isValidPrefix(inPrefix)) {
-        return true;
-      }
-    }
-  }
-  return false;
+  // Compare exact local digits with or without Brunei country prefix (673) or leading 0
+  const stripPrefix = (d: string) => {
+    if (d.startsWith('673') && d.length >= 7) return d.slice(3);
+    if (d.startsWith('0') && d.length >= 7) return d.slice(1);
+    return d;
+  };
+  const regStripped = stripPrefix(regDigits);
+  const inStripped = stripPrefix(inDigits);
+  return regStripped.length >= 7 && regStripped === inStripped;
 }
 
 export async function dbCheckInPhone(businessName: string, phone: string): Promise<CheckInResponse> {
@@ -976,7 +971,7 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
   if (inputDigits.length < 7) {
     return {
       success: false,
-      message: 'Please enter your full registered phone number (minimum 7 digits) to recognize.',
+      message: 'Please enter the exact registered phone number (minimum 7 digits) to recognize.',
     };
   }
 
@@ -987,7 +982,11 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
     .filter((m) => matchesFullPhoneNumber(m.phone, cleanPhone));
 
   if (matched.length === 0) {
-    return { success: false, notFound: true, message: `No registered member found with phone: ${cleanPhone}. Please ensure you enter your full phone number.` };
+    return {
+      success: false,
+      notFound: true,
+      message: `No registered member found with phone: ${cleanPhone}. Please enter the exact phone number registered with the account.`,
+    };
   }
 
   if (matched.length > 1) {
@@ -1007,6 +1006,39 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
   }
 
   const member = matched[0];
+  const memberStatus = getMemberStatus(member.endDate);
+
+  // BLOCK CHECK-IN IF MEMBER IS EXPIRED
+  if (memberStatus === 'Expired') {
+    const expiredMsg = `Check-in blocked: ${member.name} (ID #${member.memberId}) is EXPIRED! Current status is Expired (ended ${member.endDate || 'N/A'}).`;
+
+    await dbBroadcastEvent(businessName, {
+      type: 'expired',
+      title: '🚫 Expired Member Check-In Blocked',
+      message: expiredMsg,
+      timestamp: getBruneiFormattedTime(new Date(), true),
+      memberName: member.name,
+      memberId: member.memberId,
+    });
+
+    return {
+      success: false,
+      isExpired: true,
+      message: `Check-in blocked: Membership for ${member.name} is EXPIRED (ended on ${member.endDate || 'N/A'}). Current status is Expired. Please renew membership at the front desk.`,
+      members: [
+        {
+          memberId: member.memberId,
+          fullName: member.name,
+          phone: member.phone,
+          plan: member.plan,
+          planType: member.plan,
+          status: 'Expired',
+          expirationDate: member.endDate,
+        },
+      ],
+    };
+  }
+
   const attColl = getBusinessCollectionRef(businessName, 'attendance');
   const nowIso = new Date().toISOString();
   const deviceId = getDeviceId();
@@ -1017,7 +1049,7 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
     name: member.name,
     phone: member.phone,
     plan: member.plan,
-    status: getMemberStatus(member.endDate),
+    status: memberStatus,
     deviceId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1044,7 +1076,7 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
         phone: member.phone,
         plan: member.plan,
         planType: member.plan,
-        status: getMemberStatus(member.endDate),
+        status: memberStatus,
         expirationDate: member.endDate,
       },
     ],
@@ -1064,6 +1096,39 @@ export async function dbCheckInId(businessName: string, memberId: string): Promi
     return { success: false, notFound: true, message: `Member ID #${cleanId} not found.` };
   }
 
+  const memberStatus = getMemberStatus(matched.endDate);
+
+  // BLOCK CHECK-IN IF MEMBER IS EXPIRED
+  if (memberStatus === 'Expired') {
+    const expiredMsg = `Check-in blocked: Member #${matched.memberId} (${matched.name}) is EXPIRED! Current status is Expired (ended ${matched.endDate || 'N/A'}).`;
+
+    await dbBroadcastEvent(businessName, {
+      type: 'expired',
+      title: '🚫 Expired Member Check-In Blocked',
+      message: expiredMsg,
+      timestamp: getBruneiFormattedTime(new Date(), true),
+      memberName: matched.name,
+      memberId: matched.memberId,
+    });
+
+    return {
+      success: false,
+      isExpired: true,
+      message: `Check-in blocked: Membership for ${matched.name} is EXPIRED (ended on ${matched.endDate || 'N/A'}). Current status is Expired. Please renew membership at the front desk.`,
+      members: [
+        {
+          memberId: matched.memberId,
+          fullName: matched.name,
+          phone: matched.phone,
+          plan: matched.plan,
+          planType: matched.plan,
+          status: 'Expired',
+          expirationDate: matched.endDate,
+        },
+      ],
+    };
+  }
+
   const attColl = getBusinessCollectionRef(businessName, 'attendance');
   const nowIso = new Date().toISOString();
   const deviceId = getDeviceId();
@@ -1074,7 +1139,7 @@ export async function dbCheckInId(businessName: string, memberId: string): Promi
     name: matched.name,
     phone: matched.phone,
     plan: matched.plan,
-    status: getMemberStatus(matched.endDate),
+    status: memberStatus,
     deviceId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1101,7 +1166,7 @@ export async function dbCheckInId(businessName: string, memberId: string): Promi
         phone: matched.phone,
         plan: matched.plan,
         planType: matched.plan,
-        status: getMemberStatus(matched.endDate),
+        status: memberStatus,
         expirationDate: matched.endDate,
       },
     ],

@@ -18,6 +18,7 @@ import {
   Smartphone,
   CreditCard,
   User,
+  AlertCircle,
 } from 'lucide-react';
 import { StaffShift, PushNotification } from '../types';
 import { getBruneiFormattedDate } from '../lib/api';
@@ -84,6 +85,9 @@ export const Header: React.FC<HeaderProps> = ({
   }, [showNotifications]);
 
   const getNotificationIcon = (notif: PushNotification) => {
+    if (notif.type === 'expired' || notif.type === 'blocked' || notif.title.toLowerCase().includes('expired') || notif.title.toLowerCase().includes('blocked')) {
+      return <AlertCircle className="w-3.5 h-3.5 text-rose-400" />;
+    }
     if (notif.title.toLowerCase().includes('phone')) {
       return <Smartphone className="w-3.5 h-3.5 text-sky-400" />;
     }
@@ -262,49 +266,58 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Notification Item List */}
               <div className="max-h-72 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                 {notifications.length > 0 ? (
-                  notifications.map((n) => (
-                    <div
-                      key={n.id}
-                      className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-emerald-500/40 transition-all text-xs relative group space-y-1.5 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-1.5">
-                          {getNotificationIcon(n)}
-                          <span className="font-bold text-emerald-400 text-xs">{n.title}</span>
+                  notifications.map((n) => {
+                    const isExpiredItem = n.type === 'expired' || n.type === 'blocked' || n.title.toLowerCase().includes('expired') || n.title.toLowerCase().includes('blocked');
+                    return (
+                      <div
+                        key={n.id}
+                        className={`p-3 rounded-xl border transition-all text-xs relative group space-y-1.5 shadow-sm ${
+                          isExpiredItem
+                            ? 'bg-rose-950/40 border-rose-800/80 hover:border-rose-500'
+                            : 'bg-slate-950/80 border-slate-800 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            {getNotificationIcon(n)}
+                            <span className={`font-bold text-xs ${isExpiredItem ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {n.title}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                              {n.timestamp}
+                            </span>
+                            {/* Individual Clear / Dismiss Button */}
+                            {onClearNotificationItem && (
+                              <button
+                                type="button"
+                                onClick={() => onClearNotificationItem(n.id)}
+                                className="text-slate-500 hover:text-rose-400 p-0.5 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                                title="Clear this notification"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
-                            {n.timestamp}
-                          </span>
-                          {/* Individual Clear / Dismiss Button */}
-                          {onClearNotificationItem && (
-                            <button
-                              type="button"
-                              onClick={() => onClearNotificationItem(n.id)}
-                              className="text-slate-500 hover:text-rose-400 p-0.5 rounded hover:bg-slate-800 transition-colors cursor-pointer"
-                              title="Clear this notification"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
+
+                        <p className="text-slate-200 text-[11px] leading-snug">{n.message}</p>
+
+                        {/* Meta badge */}
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
+                          {n.memberName && (
+                            <span className="flex items-center gap-1 text-slate-300 font-medium">
+                              <User className={`w-3 h-3 ${isExpiredItem ? 'text-rose-400' : 'text-emerald-400'}`} /> {n.memberName}
+                            </span>
                           )}
+                          <span className={`${isExpiredItem ? 'text-rose-400 font-bold' : 'text-emerald-400/90 font-medium'} ml-auto flex items-center gap-0.5`}>
+                            {isExpiredItem ? '⚠️ Action Required' : '✓ Synced'}
+                          </span>
                         </div>
                       </div>
-
-                      <p className="text-slate-200 text-[11px] leading-snug">{n.message}</p>
-
-                      {/* Meta badge */}
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
-                        {n.memberName && (
-                          <span className="flex items-center gap-1 text-slate-300 font-medium">
-                            <User className="w-3 h-3 text-emerald-400" /> {n.memberName}
-                          </span>
-                        )}
-                        <span className="text-emerald-400/90 font-medium ml-auto flex items-center gap-0.5">
-                          ✓ Synced
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="text-center py-6 px-4 space-y-2">
                     <div className="w-10 h-10 rounded-full bg-slate-800/80 border border-slate-700 mx-auto flex items-center justify-center text-slate-500">

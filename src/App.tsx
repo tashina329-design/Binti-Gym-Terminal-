@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Trash2, AlertTriangle, Lock, Play, UserCheck, Bell, X } from 'lucide-react';
+import { Trash2, AlertTriangle, Lock, Play, UserCheck, Bell, X, AlertCircle } from 'lucide-react';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { StatsGrid } from './components/StatsGrid';
@@ -228,7 +228,8 @@ export default function App() {
     title: string,
     message: string,
     memberName?: string,
-    memberId?: string
+    memberId?: string,
+    type: 'checkin' | 'walkin' | 'expired' | 'blocked' | 'info' = 'checkin'
   ) => {
     const timeStr = new Date().toLocaleTimeString('en-US', {
       hour: '2-digit',
@@ -244,13 +245,19 @@ export default function App() {
       timestamp: timeStr,
       memberName,
       memberId,
-      type: 'checkin',
+      type,
       read: false,
     };
 
     // Sound chime notification if enabled
     if (isSoundEnabled) {
-      playSelfCheckinNotificationSound();
+      if (type === 'expired' || type === 'blocked') {
+        playSelfCheckinNotificationSound('expired');
+      } else if (type === 'walkin') {
+        playSelfCheckinNotificationSound('sale');
+      } else {
+        playSelfCheckinNotificationSound('checkin');
+      }
     }
 
     setNotifications((prev) => {
@@ -262,10 +269,11 @@ export default function App() {
     });
     setActivePushBanner(newNotif);
 
-    // Auto dismiss banner after 6s
+    // Auto dismiss banner after 6s (or 8s for expired warning)
+    const timeoutDuration = type === 'expired' || type === 'blocked' ? 8000 : 6000;
     setTimeout(() => {
       setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
-    }, 6000);
+    }, timeoutDuration);
   };
 
   const handleTestNotification = () => {
@@ -273,7 +281,8 @@ export default function App() {
       'Self Check-In (Test)',
       'Member test check-in processed successfully. Cloud database synchronized.',
       'Ahmad Syazwan (Test Member)',
-      'MEM-099'
+      'MEM-099',
+      'checkin'
     );
   };
 
@@ -345,9 +354,17 @@ export default function App() {
               hour12: true,
             });
 
-          playSelfCheckinNotificationSound(
-            eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
-          );
+          const isExpiredEvent =
+            eventData.type === 'expired' ||
+            eventData.type === 'blocked' ||
+            title.toLowerCase().includes('expired') ||
+            message.toLowerCase().includes('expired');
+
+          if (isSoundEnabled) {
+            playSelfCheckinNotificationSound(
+              isExpiredEvent ? 'expired' : eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
+            );
+          }
 
           const newNotif: PushNotification = {
             id: 'notif-' + Date.now(),
@@ -356,16 +373,17 @@ export default function App() {
             timestamp: timeStr,
             memberName: eventData.memberName,
             memberId: eventData.memberId,
-            type: 'checkin',
+            type: isExpiredEvent ? 'expired' : eventData.type === 'walkin' ? 'walkin' : 'checkin',
             read: false,
           };
 
           setNotifications((prev) => [newNotif, ...prev]);
           setActivePushBanner(newNotif);
 
+          const bannerTimeout = isExpiredEvent ? 8000 : 6000;
           setTimeout(() => {
             setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
-          }, 6000);
+          }, bannerTimeout);
         }
       },
       (status) => {
@@ -375,7 +393,7 @@ export default function App() {
     );
 
     return () => unsubscribe();
-  }, [currentStore, selectedDate]);
+  }, [currentStore, selectedDate, isSoundEnabled]);
 
   // Handler functions
   const handleDateChange = (date: string) => {
@@ -403,14 +421,25 @@ export default function App() {
   const handleCheckinPhone = async (phone: string): Promise<CheckInResponse> => {
     try {
       const result = await dbCheckInPhone(currentStore, phone);
-      if (result.success && !result.multiple) {
+      if (result.isExpired) {
+        const matchedMember = result.members?.[0];
+        const name = matchedMember?.fullName || 'Member';
+        triggerSelfCheckinNotification(
+          '🚫 Check-In Blocked (Expired)',
+          result.message || `Check-in blocked: ${name}'s membership is EXPIRED. Current status is Expired.`,
+          name,
+          matchedMember?.memberId,
+          'expired'
+        );
+      } else if (result.success && !result.multiple) {
         const matchedMember = result.members?.[0];
         const name = matchedMember?.fullName || 'Member';
         triggerSelfCheckinNotification(
           '🔔 Member Check-In',
           `Welcome back, ${name}! (${currentStore})`,
           name,
-          matchedMember?.memberId
+          matchedMember?.memberId,
+          'checkin'
         );
       }
       return result;
@@ -422,14 +451,25 @@ export default function App() {
   const handleCheckinId = async (memberId: string): Promise<CheckInResponse> => {
     try {
       const result = await dbCheckInId(currentStore, memberId);
-      if (result.success) {
+      if (result.isExpired) {
+        const matchedMember = result.members?.[0];
+        const name = matchedMember?.fullName || `Member #${memberId}`;
+        triggerSelfCheckinNotification(
+          '🚫 Check-In Blocked (Expired)',
+          result.message || `Check-in blocked: ${name}'s membership is EXPIRED. Current status is Expired.`,
+          name,
+          memberId,
+          'expired'
+        );
+      } else if (result.success) {
         const matchedMember = result.members?.[0];
         const name = matchedMember?.fullName || `Member #${memberId}`;
         triggerSelfCheckinNotification(
           '🔔 Member Check-In',
           `Welcome back, ${name}! (${currentStore})`,
           name,
-          memberId
+          memberId,
+          'checkin'
         );
       }
       return result;
@@ -857,14 +897,36 @@ export default function App() {
         {/* Floating Push Notification Banner in Check-in Mode */}
         {activePushBanner && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
-            <div className="bg-slate-900 border-2 border-emerald-500 rounded-2xl p-4 shadow-2xl shadow-emerald-950/80 flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md">
+            <div
+              className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-2xl flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md ${
+                activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                  ? 'border-rose-500 shadow-rose-950/80'
+                  : 'border-emerald-500 shadow-emerald-950/80'
+              }`}
+            >
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 animate-pulse">
-                  <Bell className="w-5 h-5" />
+                <div
+                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 animate-pulse ${
+                    activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                      ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                      : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                  }`}
+                >
+                  {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked' ? (
+                    <AlertCircle className="w-5 h-5" />
+                  ) : (
+                    <Bell className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-black text-emerald-400 uppercase tracking-wide">
+                    <span
+                      className={`text-xs font-black uppercase tracking-wide ${
+                        activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                          ? 'text-rose-400'
+                          : 'text-emerald-400'
+                      }`}
+                    >
                       {activePushBanner.title}
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
@@ -874,15 +936,23 @@ export default function App() {
                   <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug">
                     {activePushBanner.message}
                   </p>
-                  <span className="inline-block text-[10px] font-semibold text-emerald-400 mt-1">
-                    ✓ Logged to Firestore Cloud Database
+                  <span
+                    className={`inline-block text-[10px] font-semibold mt-1 ${
+                      activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-emerald-400'
+                    }`}
+                  >
+                    {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                      ? '⚠️ Action Required: Membership Expired'
+                      : '✓ Logged to Firestore Cloud Database'}
                   </span>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setActivePushBanner(null)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -915,14 +985,36 @@ export default function App() {
       {/* Floating Push Notification Banner on Main Terminal */}
       {activePushBanner && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
-          <div className="bg-slate-900 border-2 border-emerald-500 rounded-2xl p-4 shadow-2xl shadow-emerald-950/80 flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md">
+          <div
+            className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-2xl flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md ${
+              activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                ? 'border-rose-500 shadow-rose-950/80'
+                : 'border-emerald-500 shadow-emerald-950/80'
+            }`}
+          >
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 animate-pulse">
-                <Bell className="w-5 h-5" />
+              <div
+                className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 animate-pulse ${
+                  activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                    : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                }`}
+              >
+                {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked' ? (
+                  <AlertCircle className="w-5 h-5" />
+                ) : (
+                  <Bell className="w-5 h-5" />
+                )}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-emerald-400 uppercase tracking-wide">
+                  <span
+                    className={`text-xs font-black uppercase tracking-wide ${
+                      activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-emerald-400'
+                    }`}
+                  >
                     {activePushBanner.title}
                   </span>
                   <span className="text-[10px] text-slate-400 font-mono">
@@ -932,15 +1024,23 @@ export default function App() {
                 <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug">
                   {activePushBanner.message}
                 </p>
-                <span className="inline-block text-[10px] font-semibold text-emerald-400 mt-1">
-                  ✓ Synced across all terminal screens
+                <span
+                  className={`inline-block text-[10px] font-semibold mt-1 ${
+                    activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                      ? 'text-rose-400'
+                      : 'text-emerald-400'
+                  }`}
+                >
+                  {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                    ? '⚠️ Action Required: Membership Expired'
+                    : '✓ Synced across all terminal screens'}
                 </span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setActivePushBanner(null)}
-              className="text-slate-400 hover:text-white p-1"
+              className="text-slate-400 hover:text-white p-1 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>

@@ -179,8 +179,50 @@ export default function App() {
   };
 
   // Terminal Push Notifications State
-  const [notifications, setNotifications] = useState<PushNotification[]>([]);
+  const [notifications, setNotifications] = useState<PushNotification[]>(() => {
+    try {
+      const stored = localStorage.getItem('gym_terminal_notifications');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [activePushBanner, setActivePushBanner] = useState<PushNotification | null>(null);
+  const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('gym_sound_enabled');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSound = () => {
+    setIsSoundEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('gym_sound_enabled', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleClearNotifications = () => {
+    setNotifications([]);
+    try {
+      localStorage.removeItem('gym_terminal_notifications');
+    } catch {}
+  };
+
+  const handleClearNotificationItem = (id: string) => {
+    setNotifications((prev) => {
+      const filtered = prev.filter((n) => n.id !== id);
+      try {
+        localStorage.setItem('gym_terminal_notifications', JSON.stringify(filtered));
+      } catch {}
+      return filtered;
+    });
+  };
 
   const triggerSelfCheckinNotification = (
     title: string,
@@ -196,7 +238,7 @@ export default function App() {
     });
 
     const newNotif: PushNotification = {
-      id: 'notif-' + Date.now(),
+      id: 'notif-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       title,
       message,
       timestamp: timeStr,
@@ -206,16 +248,33 @@ export default function App() {
       read: false,
     };
 
-    // Sound chime notification
-    playSelfCheckinNotificationSound();
+    // Sound chime notification if enabled
+    if (isSoundEnabled) {
+      playSelfCheckinNotificationSound();
+    }
 
-    setNotifications((prev) => [newNotif, ...prev]);
+    setNotifications((prev) => {
+      const updated = [newNotif, ...prev.slice(0, 49)];
+      try {
+        localStorage.setItem('gym_terminal_notifications', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
     setActivePushBanner(newNotif);
 
     // Auto dismiss banner after 6s
     setTimeout(() => {
       setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
     }, 6000);
+  };
+
+  const handleTestNotification = () => {
+    triggerSelfCheckinNotification(
+      'Self Check-In (Test)',
+      'Member test check-in processed successfully. Cloud database synchronized.',
+      'Ahmad Syazwan (Test Member)',
+      'MEM-099'
+    );
   };
 
   const [activeShift, setActiveShift] = useState<StaffShift | null>(() => getStoredActiveShift(currentStore));
@@ -898,6 +957,8 @@ export default function App() {
           notifications={notifications}
           currentStore={currentBusinessName || currentStore}
           syncStatus={syncStatus}
+          isSoundEnabled={isSoundEnabled}
+          onToggleSound={toggleSound}
           onOpenShiftModal={() => setShowShiftModal(true)}
           onLockTerminal={handleLogout}
           onToggleCheckinMode={() => setIsCheckinMode(true)}
@@ -905,6 +966,9 @@ export default function App() {
             setIsRefreshing(true);
             setTimeout(() => setIsRefreshing(false), 500);
           }}
+          onClearNotifications={handleClearNotifications}
+          onClearNotificationItem={handleClearNotificationItem}
+          onTestNotification={handleTestNotification}
         />
 
         {/* Global Toolbar & Date Navigation */}

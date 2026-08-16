@@ -53,6 +53,14 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [matches, setMatches] = useState<MemberMatch[]>([]);
 
+  // Welcome Back Modal
+  const [welcomeModal, setWelcomeModal] = useState<{
+    name: string;
+    memberId?: string;
+    plan?: string;
+    status?: string;
+  } | null>(null);
+
   // Walk-in registration state
   const [walkinName, setWalkinName] = useState('');
   const [walkinPhone, setWalkinPhone] = useState('');
@@ -95,21 +103,46 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
   // Submit Member Phone Check-in
   const handleMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanDigits = memberPhone.replace(/\D/g, '');
     if (!memberPhone.trim()) return;
+
+    if (cleanDigits.length < 7) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Please enter your full registered phone number (minimum 7 digits, e.g. 8712345) to recognize.',
+      });
+      return;
+    }
 
     setLoading(true);
     setStatusMessage(null);
     setMatches([]);
 
     try {
-      const res = await onCheckinPhone(memberPhone);
+      const res = await onCheckinPhone(memberPhone.trim());
       if (res.multiple && res.members) {
         setMatches(res.members);
       } else if (res.success) {
-        setStatusMessage({ type: 'success', text: res.message || 'Welcome! Check-in verified.' });
+        const member = res.members?.[0];
+        const name = member?.fullName || 'Member';
+        setWelcomeModal({
+          name,
+          memberId: member?.memberId,
+          plan: member?.plan,
+          status: member?.status,
+        });
+        setStatusMessage({ type: 'success', text: `Welcome back, ${name}!` });
         setMemberPhone('');
+
+        // Auto-close welcome popup after 4.5 seconds
+        setTimeout(() => {
+          setWelcomeModal(null);
+        }, 4500);
       } else {
-        setStatusMessage({ type: 'error', text: res.message || 'Check-in failed. Please verify phone or speak with front desk.' });
+        setStatusMessage({
+          type: 'error',
+          text: res.message || 'Check-in failed. Please enter your full phone number or speak with front desk.',
+        });
       }
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Error communicating with check-in system.' });
@@ -124,9 +157,21 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
     try {
       const res = await onCheckinId(memberId);
       if (res.success) {
-        setStatusMessage({ type: 'success', text: res.message || 'Welcome! Check-in verified.' });
+        const member = res.members?.[0] || matches.find((m) => m.memberId === memberId);
+        const name = member?.fullName || 'Member';
+        setWelcomeModal({
+          name,
+          memberId: member?.memberId,
+          plan: member?.plan,
+          status: member?.status,
+        });
+        setStatusMessage({ type: 'success', text: `Welcome back, ${name}!` });
         setMatches([]);
         setMemberPhone('');
+
+        setTimeout(() => {
+          setWelcomeModal(null);
+        }, 4500);
       } else {
         setStatusMessage({ type: 'error', text: res.message || 'Check-in failed.' });
       }
@@ -286,7 +331,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                 </div>
                 <h2 className="text-base sm:text-xl font-black text-white tracking-tight">Member Self Check-In</h2>
                 <p className="text-[10px] sm:text-xs text-slate-400">
-                  Enter registered phone number
+                  Enter full registered phone number (e.g. 8712345)
                 </p>
               </div>
 
@@ -294,7 +339,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] sm:text-xs font-bold text-slate-300 flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-emerald-400" /> Phone Number
+                      <Phone className="w-3 h-3 text-emerald-400" /> Full Phone Number (7+ Digits)
                     </label>
                     <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-800/50">
                       Target Input
@@ -316,7 +361,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                   disabled={loading || !memberPhone.trim()}
                   className="w-full py-2.5 sm:py-3.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition-all shadow-md shadow-emerald-950/60 disabled:opacity-40 flex items-center justify-center gap-1.5"
                 >
-                  {loading ? 'Verifying...' : '⚡ Confirm Check-In'}
+                  {loading ? 'Verifying Phone...' : '⚡ Confirm Check-In'}
                 </button>
               </form>
             </div>
@@ -698,6 +743,69 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
             >
               Cancel & Stay in Kiosk Mode
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* WELCOME BACK CELEBRATION MODAL */}
+      {welcomeModal && (
+        <div
+          onClick={() => setWelcomeModal(null)}
+          className="fixed inset-0 z-[120] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-emerald-500/80 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl shadow-emerald-950/80 text-center space-y-5 animate-in zoom-in-95 relative overflow-hidden"
+          >
+            {/* Ambient Background Glow */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-48 h-48 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-3xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-1 shadow-xl shadow-emerald-950/60 animate-bounce duration-1000">
+                <div className="w-full h-full bg-slate-950 rounded-[22px] flex items-center justify-center text-emerald-400">
+                  <CheckCircle className="w-10 h-10 sm:w-12 sm:h-12" />
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-1">
+                <span className="text-xs sm:text-sm font-extrabold uppercase tracking-widest text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-3 py-1 rounded-full inline-block">
+                  CHECK-IN VERIFIED
+                </span>
+                <p className="text-sm sm:text-base font-semibold text-slate-300 pt-1">
+                  Welcome back,
+                </p>
+                <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
+                  {welcomeModal.name}
+                </h2>
+              </div>
+
+              {/* Member Details Pill */}
+              <div className="mt-4 bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between text-left">
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Membership Plan</div>
+                  <div className="text-xs sm:text-sm font-bold text-slate-200 font-mono">
+                    {welcomeModal.plan || 'Standard Member'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-950 border border-emerald-500/50 text-emerald-300 uppercase">
+                    {welcomeModal.status || 'Active'}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-400 pt-2 flex items-center justify-center gap-1.5 font-medium">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Have a great workout today at {currentStore}!
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setWelcomeModal(null)}
+                className="mt-5 w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black text-sm rounded-xl transition shadow-lg shadow-emerald-950/60"
+              >
+                Done (Tap to Continue)
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -111,16 +111,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
   // Submit Member Phone Check-in
   const handleMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanDigits = memberPhone.replace(/\D/g, '');
     if (!memberPhone.trim()) return;
-
-    if (cleanDigits.length < 7) {
-      setStatusMessage({
-        type: 'error',
-        text: 'Please enter your full registered phone number (minimum 7 digits, e.g. 8712345) to recognize.',
-      });
-      return;
-    }
 
     setLoading(true);
     setStatusMessage(null);
@@ -368,7 +359,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                 </div>
                 <h2 className="text-base sm:text-xl font-black text-white tracking-tight">Member Self Check-In</h2>
                 <p className="text-[10px] sm:text-xs text-slate-400">
-                  Enter full registered phone number (e.g. 8712345)
+                  Enter your registered phone number to check in
                 </p>
               </div>
 
@@ -376,7 +367,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] sm:text-xs font-bold text-slate-300 flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-emerald-400" /> Full Phone Number (7+ Digits)
+                      <Phone className="w-3 h-3 text-emerald-400" /> Registered Phone Number
                     </label>
                     <span className="text-[9px] sm:text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-800/50">
                       Target Input
@@ -387,7 +378,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
                     value={memberPhone}
                     onFocus={() => setActiveTarget('memberPhone')}
                     onChange={(e) => setMemberPhone(e.target.value)}
-                    placeholder="e.g. 8712345"
+                    placeholder="Enter phone number..."
                     required
                     className="w-full bg-slate-950 border-2 border-emerald-500/50 focus:border-emerald-400 rounded-xl px-4 py-3 sm:py-4 text-center text-xl sm:text-2xl font-black text-slate-100 placeholder-slate-600 focus:outline-none tracking-widest font-mono shadow-inner transition-all"
                   />

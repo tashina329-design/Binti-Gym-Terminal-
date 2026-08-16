@@ -90,6 +90,7 @@ export interface CheckInResponse {
   message?: string;
   notFound?: boolean;
   multiple?: boolean;
+  isExpired?: boolean;
   members?: MemberMatch[];
 }
 
@@ -128,7 +129,7 @@ export interface PushNotification {
   timestamp: string;
   memberName?: string;
   memberId?: string;
-  type: 'checkin' | 'walkin' | 'info';
+  type: 'checkin' | 'walkin' | 'expired' | 'blocked' | 'info';
   read?: boolean;
 }
 

@@ -61,6 +61,14 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
     status?: string;
   } | null>(null);
 
+  // Expired Membership Blocked Modal
+  const [expiredModal, setExpiredModal] = useState<{
+    name: string;
+    memberId?: string;
+    plan?: string;
+    expirationDate?: string;
+  } | null>(null);
+
   // Walk-in registration state
   const [walkinName, setWalkinName] = useState('');
   const [walkinPhone, setWalkinPhone] = useState('');
@@ -120,7 +128,21 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
 
     try {
       const res = await onCheckinPhone(memberPhone.trim());
-      if (res.multiple && res.members) {
+      if (res.isExpired) {
+        const member = res.members?.[0];
+        const name = member?.fullName || 'Member';
+        setExpiredModal({
+          name,
+          memberId: member?.memberId,
+          plan: member?.plan,
+          expirationDate: member?.expirationDate,
+        });
+        setStatusMessage({
+          type: 'error',
+          text: res.message || `Check-in blocked: Membership for ${name} is EXPIRED. Current status is Expired. Please renew at the front desk.`,
+        });
+        setMemberPhone('');
+      } else if (res.multiple && res.members) {
         setMatches(res.members);
       } else if (res.success) {
         const member = res.members?.[0];
@@ -141,7 +163,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
       } else {
         setStatusMessage({
           type: 'error',
-          text: res.message || 'Check-in failed. Please enter your full phone number or speak with front desk.',
+          text: res.message || 'Check-in failed. Please enter your exact registered phone number.',
         });
       }
     } catch (err: any) {
@@ -156,7 +178,22 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
     setLoading(true);
     try {
       const res = await onCheckinId(memberId);
-      if (res.success) {
+      if (res.isExpired) {
+        const member = res.members?.[0] || matches.find((m) => m.memberId === memberId);
+        const name = member?.fullName || 'Member';
+        setExpiredModal({
+          name,
+          memberId: member?.memberId,
+          plan: member?.plan,
+          expirationDate: member?.expirationDate,
+        });
+        setStatusMessage({
+          type: 'error',
+          text: res.message || `Check-in blocked: Membership for ${name} is EXPIRED. Current status is Expired.`,
+        });
+        setMatches([]);
+        setMemberPhone('');
+      } else if (res.success) {
         const member = res.members?.[0] || matches.find((m) => m.memberId === memberId);
         const name = member?.fullName || 'Member';
         setWelcomeModal({
@@ -801,9 +838,88 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
               <button
                 type="button"
                 onClick={() => setWelcomeModal(null)}
-                className="mt-5 w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black text-sm rounded-xl transition shadow-lg shadow-emerald-950/60"
+                className="mt-5 w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-black text-sm rounded-xl transition shadow-lg shadow-emerald-950/60 cursor-pointer"
               >
                 Done (Tap to Continue)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXPIRED MEMBERSHIP BLOCKED MODAL */}
+      {expiredModal && (
+        <div
+          onClick={() => setExpiredModal(null)}
+          className="fixed inset-0 z-[130] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-rose-500/90 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl shadow-rose-950/80 text-center space-y-5 animate-in zoom-in-95 relative overflow-hidden"
+          >
+            {/* Ambient Background Warning Glow */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-48 h-48 bg-rose-500/25 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-3xl bg-gradient-to-tr from-rose-500 to-amber-500 p-1 shadow-xl shadow-rose-950/60 animate-pulse">
+                <div className="w-full h-full bg-slate-950 rounded-[22px] flex items-center justify-center text-rose-400">
+                  <AlertCircle className="w-10 h-10 sm:w-12 sm:h-12" />
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-1.5">
+                <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-rose-300 bg-rose-950/90 border border-rose-500/60 px-3.5 py-1 rounded-full inline-block">
+                  🚫 CHECK-IN BLOCKED • STATUS: EXPIRED
+                </span>
+                <p className="text-xs sm:text-sm font-medium text-slate-300 pt-1">
+                  Membership Expired for
+                </p>
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight">
+                  {expiredModal.name}
+                </h2>
+                {expiredModal.memberId && (
+                  <span className="text-xs text-slate-400 font-mono block">
+                    Member #{expiredModal.memberId}
+                  </span>
+                )}
+              </div>
+
+              {/* Expiration Details Card */}
+              <div className="mt-4 bg-rose-950/40 border border-rose-800/60 rounded-2xl p-4 text-left space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-bold uppercase text-[10px]">Current Status:</span>
+                  <span className="font-extrabold text-rose-400 bg-rose-950 border border-rose-700/60 px-2 py-0.5 rounded text-[11px] uppercase">
+                    Expired
+                  </span>
+                </div>
+                {expiredModal.expirationDate && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Expired On:</span>
+                    <span className="font-bold text-slate-200 font-mono">{expiredModal.expirationDate}</span>
+                  </div>
+                )}
+                {expiredModal.plan && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">Previous Plan:</span>
+                    <span className="font-bold text-slate-300">{expiredModal.plan}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action notice */}
+              <div className="mt-4 p-3.5 rounded-xl bg-slate-950/90 border border-slate-800 text-xs text-slate-300 space-y-1 text-center">
+                <p className="font-bold text-amber-300">Front Desk Renewal Required</p>
+                <p className="text-[11px] text-slate-400">
+                  Please speak with our front desk staff to renew your membership and resume access.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setExpiredModal(null)}
+                className="mt-5 w-full py-3 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-sm rounded-xl transition shadow-lg shadow-rose-950/60 cursor-pointer"
+              >
+                Understood / Close
               </button>
             </div>
           </div>

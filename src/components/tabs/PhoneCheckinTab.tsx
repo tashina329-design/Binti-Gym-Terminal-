@@ -35,7 +35,14 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
 
     try {
       const res = await onCheckinPhone(phone.trim());
-      if (res.multiple && res.members) {
+      if (res.isExpired) {
+        const member = res.members?.[0];
+        const name = member?.fullName || 'Member';
+        setStatusMessage({
+          type: 'error',
+          text: res.message || `🚫 Check-In Blocked: ${name} is EXPIRED. Current status is Expired. Please renew membership.`,
+        });
+      } else if (res.multiple && res.members) {
         setMatches(res.members);
       } else if (res.success) {
         const memberName = res.members?.[0]?.fullName;
@@ -45,7 +52,7 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
         });
         setPhone('');
       } else {
-        setStatusMessage({ type: 'error', text: res.message || 'Member check-in failed. Please verify phone number.' });
+        setStatusMessage({ type: 'error', text: res.message || 'Member check-in failed. Please enter the exact registered phone number.' });
       }
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Network error occurred.' });
@@ -58,7 +65,13 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
     setLoading(true);
     try {
       const res = await onCheckinId(memberId);
-      if (res.success) {
+      if (res.isExpired) {
+        const matchedName = res.members?.[0]?.fullName || matches.find((m) => m.memberId === memberId)?.fullName || `Member #${memberId}`;
+        setStatusMessage({
+          type: 'error',
+          text: res.message || `🚫 Check-In Blocked: ${matchedName} is EXPIRED. Current status is Expired. Please renew membership.`,
+        });
+      } else if (res.success) {
         const matchedName = res.members?.[0]?.fullName || matches.find((m) => m.memberId === memberId)?.fullName;
         setStatusMessage({
           type: 'success',

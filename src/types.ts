@@ -100,7 +100,7 @@ export interface StaffShift {
   shiftTitle: string;
   startTime: string;
   startTimestamp: number;
-  startingFloat: number;
+  startingFloat?: number;
   notes?: string;
 }
 

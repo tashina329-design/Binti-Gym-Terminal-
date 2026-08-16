@@ -18,16 +18,7 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanDigits = phone.replace(/\D/g, '');
     if (!phone.trim()) return;
-
-    if (cleanDigits.length < 7) {
-      setStatusMessage({
-        type: 'error',
-        text: 'Please enter the full registered phone number (minimum 7 digits, e.g. 8712345) to recognize member.',
-      });
-      return;
-    }
 
     setLoading(true);
     setStatusMessage(null);
@@ -98,7 +89,7 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
         <div>
           <h3 className="text-lg font-bold text-slate-100">Manual Phone Number Check-In</h3>
           <p className="text-xs text-slate-400">
-            Enter member's full registered phone number to recognize and log check-in.
+            Enter the member's registered phone number to recognize and log check-in.
           </p>
         </div>
       </div>
@@ -106,14 +97,14 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
       <form onSubmit={handleSubmit} className="mt-5 space-y-4">
         <div>
           <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            Member Full Phone Number (Minimum 7 Digits)
+            Registered Phone Number
           </label>
           <div className="relative">
             <input
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="e.g. 8712345"
+              placeholder="Enter phone number..."
               required
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 text-base placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono tracking-wider"
             />

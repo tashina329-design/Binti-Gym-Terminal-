@@ -25,12 +25,38 @@ export const unlockAudioContext = () => {
   }
 };
 
-export const playSelfCheckinNotificationSound = (type: 'checkin' | 'sale' | 'general' = 'checkin') => {
+export const playSelfCheckinNotificationSound = (type: 'checkin' | 'sale' | 'expired' | 'warning' | 'general' = 'checkin') => {
   try {
     const ctx = getAudioContext();
     if (!ctx) return;
 
     const now = ctx.currentTime;
+
+    if (type === 'expired' || type === 'warning') {
+      // Two-tone lower-frequency warning chime (F4 -> C#4)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(349.23, now); // F4
+      gain1.gain.setValueAtTime(0.25, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.25);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(277.18, now + 0.18); // C#4
+      gain2.gain.setValueAtTime(0.3, now + 0.18);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.18);
+      osc2.stop(now + 0.55);
+      return;
+    }
 
     if (type === 'sale') {
       // Three-tone upbeat chime (G5 -> C6 -> E6)

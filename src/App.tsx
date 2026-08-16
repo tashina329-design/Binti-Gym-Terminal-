@@ -407,8 +407,8 @@ export default function App() {
         const matchedMember = result.members?.[0];
         const name = matchedMember?.fullName || 'Member';
         triggerSelfCheckinNotification(
-          '🔔 Self Check-In Alert',
-          `${name} checked in via terminal using Phone (${phone})!`,
+          '🔔 Member Check-In',
+          `Welcome back, ${name}! (${currentStore})`,
           name,
           matchedMember?.memberId
         );
@@ -423,10 +423,12 @@ export default function App() {
     try {
       const result = await dbCheckInId(currentStore, memberId);
       if (result.success) {
+        const matchedMember = result.members?.[0];
+        const name = matchedMember?.fullName || `Member #${memberId}`;
         triggerSelfCheckinNotification(
-          '🔔 Self Check-In Alert',
-          `Member #${memberId} successfully checked in at Binti Gym terminal!`,
-          `Member #${memberId}`,
+          '🔔 Member Check-In',
+          `Welcome back, ${name}! (${currentStore})`,
+          name,
           memberId
         );
       }

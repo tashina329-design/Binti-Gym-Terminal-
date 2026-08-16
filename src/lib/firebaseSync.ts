@@ -947,31 +947,52 @@ export async function dbBroadcastEvent(businessName: string, event: SyncEventPay
 }
 
 export function matchesFullPhoneNumber(registeredPhone: string, inputPhone: string): boolean {
-  const regDigits = (registeredPhone || '').replace(/\D/g, '');
-  const inDigits = (inputPhone || '').replace(/\D/g, '');
-  if (!regDigits || !inDigits) return false;
-  if (regDigits === inDigits) return true;
+  if (!registeredPhone || !inputPhone) return false;
 
-  // Compare exact local digits with or without Brunei country prefix (673) or leading 0
-  const stripPrefix = (d: string) => {
-    if (d.startsWith('673') && d.length >= 7) return d.slice(3);
-    if (d.startsWith('0') && d.length >= 7) return d.slice(1);
-    return d;
-  };
-  const regStripped = stripPrefix(regDigits);
-  const inStripped = stripPrefix(inDigits);
-  return regStripped.length >= 7 && regStripped === inStripped;
+  const cleanReg = registeredPhone.trim().toLowerCase();
+  const cleanIn = inputPhone.trim().toLowerCase();
+
+  // Direct exact string comparison
+  if (cleanReg === cleanIn) return true;
+
+  // Exact digits comparison (ignoring formatting like dashes, spaces, parentheses, etc.)
+  const regDigits = cleanReg.replace(/\D/g, '');
+  const inDigits = cleanIn.replace(/\D/g, '');
+
+  if (regDigits && inDigits) {
+    if (regDigits === inDigits) return true;
+
+    // Compare with or without Brunei country prefix (673) or leading 0 if digits are long enough
+    const stripPrefix = (d: string) => {
+      if (d.startsWith('673') && d.length > 3) return d.slice(3);
+      if (d.startsWith('0') && d.length > 1) return d.slice(1);
+      return d;
+    };
+    const regStripped = stripPrefix(regDigits);
+    const inStripped = stripPrefix(inDigits);
+    if (regStripped && inStripped && regStripped === inStripped) {
+      return true;
+    }
+  }
+
+  // Exact alphanumeric match ignoring spaces and punctuation
+  const regAlpha = cleanReg.replace(/[^a-z0-9]/g, '');
+  const inAlpha = cleanIn.replace(/[^a-z0-9]/g, '');
+  if (regAlpha && inAlpha && regAlpha === inAlpha) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function dbCheckInPhone(businessName: string, phone: string): Promise<CheckInResponse> {
   await ensureFirebaseAuth();
   const cleanPhone = phone.trim();
-  const inputDigits = cleanPhone.replace(/\D/g, '');
 
-  if (inputDigits.length < 7) {
+  if (!cleanPhone) {
     return {
       success: false,
-      message: 'Please enter the exact registered phone number (minimum 7 digits) to recognize.',
+      message: 'Please enter your registered phone number.',
     };
   }
 
@@ -985,7 +1006,7 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
     return {
       success: false,
       notFound: true,
-      message: `No registered member found with phone: ${cleanPhone}. Please enter the exact phone number registered with the account.`,
+      message: `No registered member found with phone: "${cleanPhone}". Please enter the exact phone number registered on your account.`,
     };
   }
 

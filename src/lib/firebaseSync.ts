@@ -946,17 +946,48 @@ export async function dbBroadcastEvent(businessName: string, event: SyncEventPay
   }
 }
 
+export function matchesFullPhoneNumber(registeredPhone: string, inputPhone: string): boolean {
+  const regDigits = (registeredPhone || '').replace(/\D/g, '');
+  const inDigits = (inputPhone || '').replace(/\D/g, '');
+  if (!regDigits || !inDigits) return false;
+  if (regDigits === inDigits) return true;
+
+  // Compare full 7-digit local numbers even if prefixed with +673 or 0
+  if (regDigits.length >= 7 && inDigits.length >= 7) {
+    const regSuffix = regDigits.slice(-7);
+    const inSuffix = inDigits.slice(-7);
+    if (regSuffix === inSuffix) {
+      const regPrefix = regDigits.slice(0, -7);
+      const inPrefix = inDigits.slice(0, -7);
+      const isValidPrefix = (p: string) => p === '' || p === '673' || p === '0' || p === '0673';
+      if (isValidPrefix(regPrefix) && isValidPrefix(inPrefix)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export async function dbCheckInPhone(businessName: string, phone: string): Promise<CheckInResponse> {
   await ensureFirebaseAuth();
   const cleanPhone = phone.trim();
+  const inputDigits = cleanPhone.replace(/\D/g, '');
+
+  if (inputDigits.length < 7) {
+    return {
+      success: false,
+      message: 'Please enter your full registered phone number (minimum 7 digits) to recognize.',
+    };
+  }
+
   const membersRef = getBusinessCollectionRef(businessName, 'members');
   const snap = await getDocs(membersRef);
   const matched = snap.docs
     .map((d) => ({ id: d.id, ...(d.data() as Member) }))
-    .filter((m) => m.phone.replace(/\D/g, '').includes(cleanPhone.replace(/\D/g, '')));
+    .filter((m) => matchesFullPhoneNumber(m.phone, cleanPhone));
 
   if (matched.length === 0) {
-    return { success: false, notFound: true, message: `No active member found with phone: ${phone}` };
+    return { success: false, notFound: true, message: `No registered member found with phone: ${cleanPhone}. Please ensure you enter your full phone number.` };
   }
 
   if (matched.length > 1) {
@@ -992,10 +1023,12 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
     updatedAt: serverTimestamp(),
   });
 
+  const welcomeMessage = `Welcome back, ${member.name}!`;
+
   await dbBroadcastEvent(businessName, {
     type: 'checkin',
-    title: '🔔 Terminal Phone Check-In',
-    message: `${member.name} checked in via terminal using Phone (${phone})!`,
+    title: '🔔 Member Check-In',
+    message: `${welcomeMessage} Checked in via phone (${cleanPhone})`,
     timestamp: getBruneiFormattedTime(new Date(), true),
     memberName: member.name,
     memberId: member.memberId,
@@ -1003,6 +1036,7 @@ export async function dbCheckInPhone(businessName: string, phone: string): Promi
 
   return {
     success: true,
+    message: welcomeMessage,
     members: [
       {
         memberId: member.memberId,
@@ -1046,10 +1080,12 @@ export async function dbCheckInId(businessName: string, memberId: string): Promi
     updatedAt: serverTimestamp(),
   });
 
+  const welcomeMessage = `Welcome back, ${matched.name}!`;
+
   await dbBroadcastEvent(businessName, {
     type: 'checkin',
-    title: '🔔 Terminal Member Check-In',
-    message: `Member #${matched.memberId} (${matched.name}) successfully checked in!`,
+    title: '🔔 Member Check-In',
+    message: `${welcomeMessage} (ID #${matched.memberId})`,
     timestamp: getBruneiFormattedTime(new Date(), true),
     memberName: matched.name,
     memberId: matched.memberId,
@@ -1057,6 +1093,7 @@ export async function dbCheckInId(businessName: string, memberId: string): Promi
 
   return {
     success: true,
+    message: welcomeMessage,
     members: [
       {
         memberId: matched.memberId,

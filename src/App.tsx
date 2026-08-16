@@ -946,76 +946,10 @@ export default function App() {
     }
   };
 
-  // Standalone Customer Entrance Check-In Terminal Mode
+  // Standalone Customer Entrance Check-In Terminal Mode (Clean Kiosk: No staff pop up notifications)
   if (isCheckinMode) {
     return (
       <div className="relative min-h-screen">
-        {/* Floating Push Notification Banner in Check-in Mode */}
-        {activePushBanner && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
-            <div
-              className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-2xl flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md ${
-                activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                  ? 'border-rose-500 shadow-rose-950/80'
-                  : 'border-emerald-500 shadow-emerald-950/80'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div
-                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 animate-pulse ${
-                    activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                      ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
-                      : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                  }`}
-                >
-                  {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked' ? (
-                    <AlertCircle className="w-5 h-5" />
-                  ) : (
-                    <Bell className="w-5 h-5" />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-xs font-black uppercase tracking-wide ${
-                        activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                          ? 'text-rose-400'
-                          : 'text-emerald-400'
-                      }`}
-                    >
-                      {activePushBanner.title}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {activePushBanner.timestamp}
-                    </span>
-                  </div>
-                  <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug">
-                    {activePushBanner.message}
-                  </p>
-                  <span
-                    className={`inline-block text-[10px] font-semibold mt-1 ${
-                      activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                        ? 'text-rose-400'
-                        : 'text-emerald-400'
-                    }`}
-                  >
-                    {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                      ? '⚠️ Action Required: Membership Expired'
-                      : '✓ Logged to Firestore Cloud Database'}
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActivePushBanner(null)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
         <EntranceCheckInView
           onCheckinPhone={handleCheckinPhone}
           onCheckinId={handleCheckinId}

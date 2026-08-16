@@ -116,11 +116,11 @@ export const Header: React.FC<HeaderProps> = ({
           className={`ml-0 sm:ml-1 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border transition-all cursor-pointer ${
             activeShift
               ? 'bg-slate-900 hover:bg-slate-800 text-slate-100 border-emerald-500/40 shadow-sm'
-              : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse'
+              : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40 animate-pulse'
           }`}
-          title="Manage Staff Shift"
+          title="Staff Shift Duty Status"
         >
-          <div className={`w-2 h-2 rounded-full ${activeShift ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+          <div className={`w-2 h-2 rounded-full ${activeShift ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`} />
           <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
           {activeShift ? (
             <span>
@@ -128,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-slate-400 font-normal ml-1">({activeShift.startTime})</span>
             </span>
           ) : (
-            <span className="text-amber-300 font-bold">No Shift Active — Start Shift</span>
+            <span className="text-rose-300 font-bold">🔒 No Staff On Duty — Clock In</span>
           )}
         </button>
 

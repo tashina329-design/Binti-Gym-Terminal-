@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Trash2, AlertTriangle, Lock, Play, UserCheck, Bell, X, AlertCircle } from 'lucide-react';
+import { Trash2, AlertTriangle, Lock, Play, UserCheck, Bell, X, AlertCircle, Monitor } from 'lucide-react';
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { StatsGrid } from './components/StatsGrid';
@@ -548,6 +548,11 @@ export default function App() {
 
   // Transaction Actions (Direct Firestore Subcollection Writes with 0ms Optimistic UI)
   const handleRecordWalkIn = async (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => {
+    if (!activeShift && !isCheckinMode) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -584,6 +589,11 @@ export default function App() {
   };
 
   const handleRecordPOS = async (data: { itemName: string; qty: number; amount: number; paymentMethod: string }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -613,6 +623,11 @@ export default function App() {
   };
 
   const handleRecordClass = async (data: { className: string; clientName: string; amount: number; paymentMethod: string }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -641,6 +656,11 @@ export default function App() {
   };
 
   const handleRecordPTIn = async (data: { trainerName: string; clientName: string; sessions: string; amount: number; paymentMethod: string }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -669,6 +689,11 @@ export default function App() {
   };
 
   const handleRecordPTOut = async (data: { trainerName: string; description: string; amount: number; paymentMethod: string }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -697,6 +722,11 @@ export default function App() {
   };
 
   const handleRecordExpense = async (data: { category: string; description: string; amount: number; paymentMethod: string }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optExp = {
@@ -732,6 +762,11 @@ export default function App() {
     endDate: string;
     paymentMethod: string;
   }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optMemberId = 'MEM' + String(Math.floor(1000 + Math.random() * 9000));
@@ -782,6 +817,11 @@ export default function App() {
     price: number;
     paymentMethod: string;
   }) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return dashboardData;
+    }
+
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
     const optSale = {
@@ -811,6 +851,10 @@ export default function App() {
 
   // Deletion Handlers triggering custom confirmation modal
   const handleDeleteSale = (record: any) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
     setDeleteTarget({
       type: 'sale',
       title: 'Delete Income Record',
@@ -820,6 +864,10 @@ export default function App() {
   };
 
   const handleDeleteAttendance = (record: any) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
     setDeleteTarget({
       type: 'attendance',
       title: 'Delete Attendance Log',
@@ -829,6 +877,10 @@ export default function App() {
   };
 
   const handleDeleteExpense = (record: any) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
     setDeleteTarget({
       type: 'expense',
       title: 'Delete Expense Record',
@@ -838,6 +890,10 @@ export default function App() {
   };
 
   const handleDeleteMember = (memberId: string) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
     const member = dashboardData.members?.find((m) => m.memberId === memberId);
     const nameStr = member ? member.name : memberId;
     setDeleteTarget({
@@ -1086,35 +1142,29 @@ export default function App() {
           }}
         />
 
-        {/* Shift Warning Banner if not started */}
-        {!activeShift && !dismissShiftBanner && (
-          <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-amber-200 backdrop-blur-sm relative">
-            <div className="flex items-center gap-3 pr-6 sm:pr-0">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-                <AlertTriangle className="w-4 h-4" />
+        {/* Terminal Blocked Alert Banner if no active staff shift */}
+        {!activeShift && (
+          <div className="bg-rose-950/40 border border-rose-500/50 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-rose-200 backdrop-blur-sm shadow-xl shadow-rose-950/30">
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 animate-pulse">
+                <Lock className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-xs sm:text-sm font-bold text-amber-100">No Active Staff Shift Started</p>
-                <p className="text-[11px] sm:text-xs text-amber-300/80">
-                  Transactions are logged under generic "Duty Staff". Start a shift to track cashier duty & starting float.
+                <p className="text-sm font-black text-rose-100 flex items-center gap-2">
+                  Terminal Blocked: No Staff On Duty
+                </p>
+                <p className="text-xs text-rose-300/80 mt-0.5">
+                  All terminal operations, transaction logs, check-ins, and POS sales are blocked until an authorized staff starts duty.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
               <button
                 type="button"
                 onClick={() => setShowShiftModal(true)}
-                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition shrink-0 cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/50 transition cursor-pointer"
               >
-                <Play className="w-3.5 h-3.5 fill-slate-950" /> Start Duty Shift
-              </button>
-              <button
-                type="button"
-                onClick={() => setDismissShiftBanner(true)}
-                className="p-1.5 text-amber-400/60 hover:text-amber-200 rounded-lg hover:bg-amber-900/40 transition cursor-pointer"
-                title="Dismiss notice"
-              >
-                <X className="w-4 h-4" />
+                <UserCheck className="w-3.5 h-3.5" /> Start Staff Shift
               </button>
             </div>
           </div>
@@ -1136,52 +1186,84 @@ export default function App() {
           onToggleCheckinMode={() => setIsCheckinMode(true)}
         />
 
-        {/* Active Tab View Content */}
-        <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xl">
-          {activeTab === 'sales' && (
-            <SalesTab
-              data={dashboardData}
-              onDeleteSale={handleDeleteSale}
-              onDeleteAttendance={handleDeleteAttendance}
-              onDeleteExpense={handleDeleteExpense}
-            />
-          )}
+        {/* Active Tab View Content / Locked Screen */}
+        {!activeShift ? (
+          <div className="bg-slate-900/95 border-2 border-rose-500/30 p-8 sm:p-12 rounded-3xl shadow-2xl text-center flex flex-col items-center justify-center space-y-5">
+            <div className="w-16 h-16 rounded-3xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-inner">
+              <Lock className="w-8 h-8" />
+            </div>
+            <div className="max-w-md space-y-2">
+              <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                Terminal Locked — Staff On Duty Required
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                All daily operations, POS checkout, dance/fitness classes, PT sessions, walk-in passes, member registrations, and ledgers are locked until a staff member clocks in.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowShiftModal(true)}
+                className="w-full sm:w-auto px-6 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-950/50 transition-all cursor-pointer"
+              >
+                <UserCheck className="w-4 h-4" /> Start Staff Duty Shift
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCheckinMode(true)}
+                className="w-full sm:w-auto px-5 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 border border-slate-700 transition cursor-pointer"
+              >
+                <Monitor className="w-4 h-4 text-emerald-400" /> Customer Entrance Kiosk
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xl">
+            {activeTab === 'sales' && (
+              <SalesTab
+                data={dashboardData}
+                onDeleteSale={handleDeleteSale}
+                onDeleteAttendance={handleDeleteAttendance}
+                onDeleteExpense={handleDeleteExpense}
+              />
+            )}
 
-          {activeTab === 'staffcheckin' && (
-            <PhoneCheckinTab
-              onCheckinPhone={handleCheckinPhone}
-              onCheckinId={handleCheckinId}
-            />
-          )}
+            {activeTab === 'staffcheckin' && (
+              <PhoneCheckinTab
+                onCheckinPhone={handleCheckinPhone}
+                onCheckinId={handleCheckinId}
+              />
+            )}
 
-          {activeTab === 'pos' && <PosTab onRecordPOS={handleRecordPOS} />}
+            {activeTab === 'pos' && <PosTab onRecordPOS={handleRecordPOS} />}
 
-          {activeTab === 'classes' && <ClassesTab onRecordClass={handleRecordClass} />}
+            {activeTab === 'classes' && <ClassesTab onRecordClass={handleRecordClass} />}
 
-          {activeTab === 'pt' && (
-            <PersonalTrainerTab
-              onRecordPTIn={handleRecordPTIn}
-              onRecordPTOut={handleRecordPTOut}
-            />
-          )}
+            {activeTab === 'pt' && (
+              <PersonalTrainerTab
+                onRecordPTIn={handleRecordPTIn}
+                onRecordPTOut={handleRecordPTOut}
+              />
+            )}
 
-          {activeTab === 'walkin' && <WalkInTab onRecordWalkIn={handleRecordWalkIn} />}
+            {activeTab === 'walkin' && <WalkInTab onRecordWalkIn={handleRecordWalkIn} />}
 
-          {activeTab === 'membership' && (
-            <MemberRegistrationTab
-              data={dashboardData}
-              onRegisterMember={handleRegisterMember}
-              onOpenRenewModal={(m) => setRenewMember(m)}
-              onDeleteMember={handleDeleteMember}
-            />
-          )}
+            {activeTab === 'membership' && (
+              <MemberRegistrationTab
+                data={dashboardData}
+                onRegisterMember={handleRegisterMember}
+                onOpenRenewModal={(m) => setRenewMember(m)}
+                onDeleteMember={handleDeleteMember}
+              />
+            )}
 
-          {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
+            {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
 
-          {activeTab === 'qrposter' && <QrPosterTab />}
+            {activeTab === 'qrposter' && <QrPosterTab />}
 
-          {activeTab === 'sheets' && <GoogleSheetsTab dashboardData={dashboardData} />}
-        </div>
+            {activeTab === 'sheets' && <GoogleSheetsTab dashboardData={dashboardData} />}
+          </div>
+        )}
       </div>
 
       {/* Quick Renew Modal */}

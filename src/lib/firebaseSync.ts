@@ -392,6 +392,24 @@ export function computeDashboardFromCollections(
     }
   }
 
+  // Sort in reverse chronological order so latest records appear at the top
+  const parseTimestampMs = (ts?: string): number => {
+    if (!ts) return 0;
+    const time = new Date(ts).getTime();
+    return isNaN(time) ? 0 : time;
+  };
+
+  todaySales.sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+  todayExpenses.sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+  todayAttendance.sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+
+  // Sort members list so newest registered members appear at top
+  membersList.sort((a, b) => {
+    const timeA = a.startDate ? new Date(a.startDate).getTime() : 0;
+    const timeB = b.startDate ? new Date(b.startDate).getTime() : 0;
+    return timeB - timeA;
+  });
+
   const storeData: GymDataStore = {
     members: membersList,
     attendance,

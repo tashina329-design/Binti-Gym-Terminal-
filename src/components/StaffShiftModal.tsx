@@ -3,13 +3,9 @@ import { StaffShift, DashboardData } from '../types';
 import {
   UserCheck,
   Clock,
-  DollarSign,
   X,
   Play,
   LogOut,
-  KeyRound,
-  Check,
-  Shield,
   Briefcase,
   TrendingUp,
 } from 'lucide-react';
@@ -45,7 +41,6 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
   });
   const [shiftOption, setShiftOption] = useState<string>('Morning shift');
   const [customShiftTitle, setCustomShiftTitle] = useState<string>('');
-  const [startingFloat, setStartingFloat] = useState<number>(50.0);
   const [notes, setNotes] = useState('');
 
   if (!isOpen) return null;
@@ -69,7 +64,6 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
       shiftTitle: resolvedShiftTitle,
       startTime: timeStr,
       startTimestamp: Date.now(),
-      startingFloat: Number(startingFloat) || 0,
       notes,
     };
 
@@ -83,7 +77,7 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -118,22 +112,11 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs border-t border-slate-800/80 pt-3 mt-2">
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-sky-400" /> Shift Started
-                  </div>
-                  <div className="text-sm font-bold text-slate-100 mt-0.5">{activeShift.startTime}</div>
+              <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 text-xs border-t border-slate-800/80 mt-2">
+                <div className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-sky-400" /> Shift Started At
                 </div>
-
-                <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                    <DollarSign className="w-3 h-3 text-emerald-400" /> Opening Float
-                  </div>
-                  <div className="text-sm font-bold text-emerald-400 mt-0.5">
-                    ${activeShift.startingFloat.toFixed(2)}
-                  </div>
-                </div>
+                <div className="text-sm font-bold text-slate-100 mt-1">{activeShift.startTime}</div>
               </div>
 
               {/* Financial Shift Overview */}
@@ -158,7 +141,7 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
             <button
               type="button"
               onClick={onEndShift}
-              className="w-full py-3 bg-rose-600 hover:bg-rose-500 active:scale-[0.99] text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 transition-all"
+              className="w-full py-3 bg-rose-600 hover:bg-rose-500 active:scale-[0.99] text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-950/50 transition-all cursor-pointer"
             >
               <LogOut className="w-4 h-4" /> End Shift & Clock Out
             </button>
@@ -213,33 +196,18 @@ export const StaffShiftModal: React.FC<StaffShiftModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center gap-1">
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Opening Cash ($)
-                </label>
-                <input
-                  type="number"
-                  step="5.00"
-                  value={startingFloat}
-                  onChange={(e) => setStartingFloat(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-sm text-emerald-400 font-bold focus:outline-none font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" /> Current Time
-                </label>
-                <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-300 font-mono">
-                  {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-                </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-slate-400" /> Current Time
+              </label>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-300 font-mono">
+                {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all mt-2"
+              className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 transition-all mt-2 cursor-pointer"
             >
               <Play className="w-4 h-4 fill-slate-950" /> Start Staff Shift
             </button>

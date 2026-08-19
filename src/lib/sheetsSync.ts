@@ -332,9 +332,9 @@ export function buildDailySummaryRows(metrics: DailySummaryMetrics): Array<[stri
     ['TOTAL EXPENSES OUT', fmt(metrics.totalExpensesOut)],
     ['--- SUMMARY ---', ''],
     ['NET CASH BALANCE (Drawer Cash)', fmt(metrics.netCash)],
-    ['NET DAILY BALANCE (All Methods)', fmt(metrics.netDaily)],
     ['NET BAIDURI BALANCE', fmt(metrics.netBaiduri)],
     ['NET BIBD BALANCE', fmt(metrics.netBibd)],
+    ['NET DAILY BALANCE (All Methods)', fmt(metrics.netDaily)],
   ];
 }
 
@@ -786,6 +786,19 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+    // Row 20: NET DAILY BALANCE (All Methods) - Highlighted with soft gold background #FEF08A & dark amber bold text #92400E
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 19, endRowIndex: 20, startColumnIndex: 0, endColumnIndex: 2 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 254 / 255, green: 240 / 255, blue: 138 / 255 },
+            textFormat: { foregroundColor: { red: 146 / 255, green: 64 / 255, blue: 14 / 255 }, bold: true, fontSize: 10 },
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat)',
       },
     },
   ];

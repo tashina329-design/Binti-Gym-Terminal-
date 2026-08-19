@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import {
   FileSpreadsheet,
@@ -12,7 +12,12 @@ import {
   Calendar,
   Users,
   DollarSign,
-  ClipboardList
+  ClipboardList,
+  Eye,
+  TrendingUp,
+  CreditCard,
+  Smartphone,
+  Coins
 } from 'lucide-react';
 import {
   initAuth,
@@ -23,6 +28,7 @@ import {
 import {
   findOrCreateGymSpreadsheet,
   syncDataToGoogleSheets,
+  calculateDailySummaryMetrics,
   SpreadsheetInfo
 } from '../../lib/sheetsSync';
 import { DashboardData } from '../../types';
@@ -44,6 +50,13 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Compute live Daily Summary Report metrics
+  const summaryMetrics = useMemo(() => {
+    return calculateDailySummaryMetrics(dashboardData);
+  }, [dashboardData]);
+
+  const fmtCurrency = (val: number) => `$${(Number(val) || 0).toFixed(2)}`;
 
   // Initialize Auth state
   useEffect(() => {
@@ -134,7 +147,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
       });
       setLastSynced(nowStr);
       localStorage.setItem('last_sheets_sync_time', nowStr);
-      setSuccessMsg(`Successfully synced sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
+      setSuccessMsg(`Successfully pushed Daily Summary (Latest on Top), sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
     } catch (err: any) {
       console.error('Sync failed:', err);
       setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
@@ -160,7 +173,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Automatically sync sales, member logs, check-ins, and expenses directly to your Google Spreadsheet.
+                Sync Daily Summary (Latest on Top), Net Baiduri, Net BIBD, sales, check-ins, and expenses directly to Google Sheets.
               </p>
             </div>
           </div>
@@ -242,112 +255,234 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Spreadsheet Target Info */}
-          <div className="md:col-span-2 bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Active Destination Spreadsheet
-              </h3>
-              {spreadsheet && (
-                <a
-                  href={spreadsheet.spreadsheetUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Open in Google Sheets
-                </a>
-              )}
-            </div>
-
-            {isLoadingSpreadsheet ? (
-              <div className="p-6 bg-slate-950 rounded-xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" /> Fetching spreadsheet from Google Drive...
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Target info & Quick stats */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Spreadsheet Target Info */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Active Destination Spreadsheet
+                </h3>
+                {spreadsheet && (
+                  <a
+                    href={spreadsheet.spreadsheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Open in Google Sheets
+                  </a>
+                )}
               </div>
-            ) : spreadsheet ? (
-              <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-                  <div>
-                    <p className="text-xs text-slate-400">Spreadsheet Name</p>
-                    <p className="text-sm font-bold text-white mt-0.5">{spreadsheet.title}</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold rounded-lg flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ready
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs pt-1">
-                  <div>
-                    <span className="text-slate-400 block text-[11px]">Synced Tabs</span>
-                    <span className="font-semibold text-slate-200">5 Sheets (Sales, Attendance, Members, Expenses, Summary)</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block text-[11px]">Last Sync Status</span>
-                    <span className="font-semibold text-emerald-400">
-                      {lastSynced ? `Synced at ${lastSynced}` : 'Never synced'}
+              {isLoadingSpreadsheet ? (
+                <div className="p-6 bg-slate-950 rounded-xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" /> Fetching spreadsheet from Google Drive...
+                </div>
+              ) : spreadsheet ? (
+                <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                    <div>
+                      <p className="text-xs text-slate-400">Spreadsheet Name</p>
+                      <p className="text-sm font-bold text-white mt-0.5">{spreadsheet.title}</p>
+                    </div>
+                    <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold rounded-lg flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ready
                     </span>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Synced Tabs (Latest on Top)</span>
+                      <span className="font-semibold text-slate-200">Daily Summary, Sales, Check-Ins, Members, Expenses</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Last Sync Status</span>
+                      <span className="font-semibold text-emerald-400">
+                        {lastSynced ? `Synced at ${lastSynced}` : 'Never synced'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-300">
+                  No active spreadsheet found. Click "Sync Current Data" to generate a new spreadsheet in your Google Drive.
+                </div>
+              )}
+
+              {/* Sync Controls */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  onClick={handleTriggerSync}
+                  disabled={isSyncing || !spreadsheet}
+                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                  {isSyncing ? 'Pushing Data to Google Sheets...' : 'Sync Current Data to Google Sheets'}
+                </button>
+
+                <p className="text-[11px] text-slate-400">
+                  🔒 Safe & encrypted via Google Workspace OAuth API
+                </p>
+              </div>
+            </div>
+
+            {/* Sync Content Payload Stats */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
+                <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload to Sync
+              </h3>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Sales Records
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todaySales.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <Calendar className="w-3.5 h-3.5 text-sky-400" /> Check-In Visits
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todayAttendance.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <Users className="w-3.5 h-3.5 text-purple-400" /> Registered
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.members.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Expenses
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todayExpenses.length}</p>
                 </div>
               </div>
-            ) : (
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-300">
-                No active spreadsheet found. Click "Sync Now" to generate a new spreadsheet in your Google Drive.
-              </div>
-            )}
-
-            {/* Sync Controls */}
-            <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-              <button
-                onClick={handleTriggerSync}
-                disabled={isSyncing || !spreadsheet}
-                className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                {isSyncing ? 'Pushing Data to Google Sheets...' : 'Sync Current Data to Google Sheets'}
-              </button>
-
-              <p className="text-[11px] text-slate-400">
-                🔒 Safe & encrypted via Google Workspace OAuth API
-              </p>
             </div>
           </div>
 
-          {/* Sync Content Preview Stats */}
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-              <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload
-            </h3>
+          {/* Right Column: Live Daily Summary Report Preview (Matching User Screenshot Layout) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                <Eye className="w-4 h-4 text-emerald-400" /> Daily Summary Report Format
+              </h3>
+              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-600/30 px-2 py-0.5 rounded">
+                Live Preview
+              </span>
+            </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Today's Sales Records
-                </span>
-                <span className="font-bold text-white">{dashboardData.todaySales.length} items</span>
+            {/* Google Sheets Style Rendered Table */}
+            <div className="border border-slate-700/80 rounded-xl overflow-hidden text-xs bg-slate-950 shadow-inner font-sans">
+              {/* Header: REPORT FOR ... */}
+              <div className="bg-slate-950 border-b border-slate-800 p-2.5 text-center font-bold text-white tracking-wide text-xs">
+                {summaryMetrics.headerTitle}
               </div>
 
-              <div className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-sky-400" /> Today's Check-Ins
-                </span>
-                <span className="font-bold text-white">{dashboardData.todayAttendance.length} visits</span>
+              {/* Counts */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>New Membership Sign-ups</span>
+                  <span className="font-semibold text-white">{summaryMetrics.newMembershipCount}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Walk-In Entries</span>
+                  <span className="font-semibold text-white">{summaryMetrics.walkInCount}</span>
+                </div>
               </div>
 
-              <div className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-purple-400" /> Registered Members
-                </span>
-                <span className="font-bold text-white">{dashboardData.members.length} members</span>
+              {/* INCOME BANNER */}
+              <div className="bg-emerald-600 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider">
+                --- INCOME (PAYMENT IN) ---
               </div>
 
-              <div className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Today's Expenses
-                </span>
-                <span className="font-bold text-white">{dashboardData.todayExpenses.length} entries</span>
+              {/* Income Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Cash In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.cashIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Baiduri In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.baiduriIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Bibd In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.bibdIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Coupon In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.couponIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-emerald-950/60 text-emerald-400 font-bold border-t border-emerald-800/40">
+                  <span>TOTAL INCOME IN</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.totalIncomeIn)}</span>
+                </div>
+              </div>
+
+              {/* EXPENSES BANNER */}
+              <div className="bg-rose-600 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider">
+                --- EXPENSES (PAYMENT OUT) ---
+              </div>
+
+              {/* Expenses Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Cash Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.cashOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Baiduri Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.baiduriOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Bibd Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.bibdOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Coupon Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.couponOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-rose-950/60 text-rose-400 font-bold border-t border-rose-800/40">
+                  <span>TOTAL EXPENSES OUT</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.totalExpensesOut)}</span>
+                </div>
+              </div>
+
+              {/* SUMMARY BANNER */}
+              <div className="bg-slate-950 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider border-t border-slate-800">
+                --- SUMMARY ---
+              </div>
+
+              {/* Summary Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 font-bold text-sky-400">
+                  <span>NET CASH BALANCE (Drawer Cash)</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netCash)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 font-bold bg-amber-950/40 text-amber-300 border-t border-amber-800/30">
+                  <span>NET DAILY BALANCE (All Methods)</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netDaily)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 font-bold text-sky-400">
+                  <span>NET BAIDURI BALANCE</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netBaiduri)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 font-bold text-purple-400">
+                  <span>NET BIBD BALANCE</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netBibd)}</span>
+                </div>
               </div>
             </div>
+
+            <p className="text-[10px] text-slate-500 text-center">
+              Synced to Google Sheets tab "Daily Summary" with newest reports at row 1.
+            </p>
           </div>
         </div>
       )}
@@ -367,7 +502,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-              Are you sure you want to write the current sales ({dashboardData.todaySales.length}), check-in visits ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expense logs to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
+              Are you sure you want to sync the formatted <strong>Daily Summary</strong> (with Net Baiduri & Net BIBD, latest on top), along with sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">

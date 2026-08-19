@@ -623,14 +623,15 @@ export async function syncDataToGoogleSheets(
     },
     // 3. Sales Log (Reverse chronological - latest on top)
     {
-      range: "'Sales Log'!A1:F500",
+      range: "'Sales Log'!A1:G500",
       values: [
-        ['Timestamp / Time', 'Staff on Duty', 'Category', 'Customer', 'Payment Method', 'Amount ($)'],
+        ['Timestamp / Time', 'Staff on Duty', 'Category', 'Customer / Guest', 'Phone Number', 'Payment Method', 'Amount ($)'],
         ...data.todaySales.map((s) => [
           s.timestamp || s.time,
           s.staff || 'Duty Staff',
           s.category,
           s.customer,
+          s.phone && s.phone !== '-' ? s.phone : '-',
           s.payment,
           s.amount,
         ]),
@@ -638,13 +639,13 @@ export async function syncDataToGoogleSheets(
     },
     // 4. Check-In Log (Reverse chronological - latest on top)
     {
-      range: "'Check-In Log'!A1:F500",
+      range: "'Check-In Log'!A1:E500",
       values: [
-        ['Check-In Time', 'Member Name', 'Phone Number', 'Plan', 'Check-In Status'],
+        ['Check-In Time', 'Member / Guest Name', 'Phone Number', 'Plan / Activity', 'Check-In Status'],
         ...data.todayAttendance.map((a) => [
           a.timestamp || a.time,
           a.name,
-          a.phone,
+          a.phone && a.phone !== '-' ? a.phone : '-',
           a.plan,
           a.status,
         ]),

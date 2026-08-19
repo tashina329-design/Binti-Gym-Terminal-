@@ -133,3 +133,9 @@ export interface PushNotification {
   read?: boolean;
 }
 
+export interface SpreadsheetInfo {
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  title: string;
+}
+

@@ -18,6 +18,7 @@ import { QuickRenewModal } from './components/QuickRenewModal';
 import { EntranceCheckInView } from './components/EntranceCheckInView';
 import { StaffShiftModal } from './components/StaffShiftModal';
 import { BusinessAuthModal } from './components/BusinessAuthModal';
+import { ResetDatabaseModal } from './components/ResetDatabaseModal';
 import { playSelfCheckinNotificationSound } from './lib/soundNotification';
 import {
   subscribeFirestoreBusiness,
@@ -41,6 +42,7 @@ import {
   dbStartShift,
   dbEndShift,
   dbResetDemoData,
+  dbClearAllDataToZero,
   fetchStoresFromCloud,
   getBruneiTodayIsoDate,
   SyncEventPayload,
@@ -296,6 +298,9 @@ export function App() {
   // Quick renew modal state
   const [renewMember, setRenewMember] = useState<Member | null>(null);
 
+  // Database reset modal state
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+
   // Delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = useState<{
     type: 'sale' | 'attendance' | 'expense' | 'member';
@@ -408,13 +413,33 @@ export function App() {
     setSelectedDate(today);
   };
 
-  const handleResetDatabase = async () => {
-    if (!window.confirm('Reset Firestore database to standard demo seed records?')) return;
+  const handleResetDatabase = () => {
+    setIsResetModalOpen(true);
+  };
+
+  const handleResetToDemo = async () => {
     setIsRefreshing(true);
     try {
       await dbResetDemoData(currentStore);
+      const today = getBruneiTodayIsoDate();
+      setSelectedDate(today);
     } catch (err: any) {
-      alert('Error resetting database: ' + (err.message || err));
+      console.error('Error resetting database to demo:', err);
+      throw err;
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleClearToZero = async () => {
+    setIsRefreshing(true);
+    try {
+      await dbClearAllDataToZero(currentStore);
+      const today = getBruneiTodayIsoDate();
+      setSelectedDate(today);
+    } catch (err: any) {
+      console.error('Error clearing database to zero:', err);
+      throw err;
     } finally {
       setIsRefreshing(false);
     }
@@ -1432,6 +1457,15 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* Database Reset Options Modal */}
+      <ResetDatabaseModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onResetToDemo={handleResetToDemo}
+        onClearToZero={handleClearToZero}
+        currentStore={currentStore}
+      />
 
       {/* Store Registration / Multi-Device Business Login Modal */}
       <BusinessAuthModal

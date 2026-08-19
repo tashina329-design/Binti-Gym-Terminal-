@@ -465,17 +465,20 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
                   <span>NET CASH BALANCE (Drawer Cash)</span>
                   <span className="font-mono">{fmtCurrency(summaryMetrics.netCash)}</span>
                 </div>
-                <div className="flex justify-between px-3 py-2 font-bold bg-amber-950/40 text-amber-300 border-t border-amber-800/30">
-                  <span>NET DAILY BALANCE (All Methods)</span>
-                  <span className="font-mono">{fmtCurrency(summaryMetrics.netDaily)}</span>
-                </div>
-                <div className="flex justify-between px-3 py-1.5 font-bold text-sky-400">
+                <div className="flex justify-between px-3 py-1.5 font-bold text-cyan-400">
                   <span>NET BAIDURI BALANCE</span>
                   <span className="font-mono">{fmtCurrency(summaryMetrics.netBaiduri)}</span>
                 </div>
                 <div className="flex justify-between px-3 py-1.5 font-bold text-purple-400">
                   <span>NET BIBD BALANCE</span>
                   <span className="font-mono">{fmtCurrency(summaryMetrics.netBibd)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 font-bold bg-amber-500/20 text-amber-300 border-t border-amber-500/40 shadow-inner">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    NET DAILY BALANCE (All Methods)
+                  </span>
+                  <span className="font-mono text-amber-200">{fmtCurrency(summaryMetrics.netDaily)}</span>
                 </div>
               </div>
             </div>

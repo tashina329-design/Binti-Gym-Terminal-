@@ -147,7 +147,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
       });
       setLastSynced(nowStr);
       localStorage.setItem('last_sheets_sync_time', nowStr);
-      setSuccessMsg(`Successfully pushed Daily Summary (Latest on Top), sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
+      setSuccessMsg(`Successfully pushed Daily & Monthly Summaries, sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
     } catch (err: any) {
       console.error('Sync failed:', err);
       setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
@@ -173,7 +173,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Sync Daily Summary (Latest on Top), Net Baiduri, Net BIBD, sales, check-ins, and expenses directly to Google Sheets.
+                Sync Daily Summary (Latest on Top), Monthly Financial Summary, Net Baiduri, Net BIBD, sales, check-ins, and expenses directly to Google Sheets.
               </p>
             </div>
           </div>
@@ -295,7 +295,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
                   <div className="grid grid-cols-2 gap-3 text-xs pt-1">
                     <div>
                       <span className="text-slate-400 block text-[11px]">Synced Tabs (Latest on Top)</span>
-                      <span className="font-semibold text-slate-200">Daily Summary, Sales, Check-Ins, Members, Expenses</span>
+                      <span className="font-semibold text-slate-200">Daily Summary, Monthly Summary, Sales, Check-Ins, Members, Expenses</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[11px]">Last Sync Status</span>
@@ -502,7 +502,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-              Are you sure you want to sync the formatted <strong>Daily Summary</strong> (with Net Baiduri & Net BIBD, latest on top), along with sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
+              Are you sure you want to sync the formatted <strong>Daily Summary</strong> and <strong>Monthly Financial Summary</strong> (with Net Baiduri & Net BIBD, latest on top), along with sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">

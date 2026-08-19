@@ -13,7 +13,7 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db, ensureFirebaseAuth } from './firebase';
-import { DashboardData, Member, StaffShift, RegisteredStaff, CheckInResponse, PTDetail } from '../types';
+import { DashboardData, Member, StaffShift, RegisteredStaff, CheckInResponse, PTDetail, SpreadsheetInfo } from '../types';
 
 export const BRUNEI_TIMEZONE = 'Asia/Brunei';
 
@@ -1915,6 +1915,90 @@ export async function dbClearAllDataToZero(businessName: string) {
     message: 'All today transactions, attendances, and expenses have been reset to zero.',
     timestamp: getBruneiFormattedTime(new Date(), true),
   });
+}
+
+// -------------------------------------------------------------
+// Store-Specific Google Spreadsheet Sync Settings
+// -------------------------------------------------------------
+
+export async function dbGetStoreSpreadsheet(businessName?: string): Promise<SpreadsheetInfo | null> {
+  try {
+    const cleanName = (businessName || getStoredBusinessName() || 'Binti Gym').trim();
+    const storeKey = normalizeStoreKey(cleanName);
+    const local = localStorage.getItem(`gym_spreadsheet_${storeKey}`);
+    let localInfo: SpreadsheetInfo | null = null;
+    if (local) {
+      try {
+        localInfo = JSON.parse(local);
+      } catch {}
+    }
+
+    await ensureFirebaseAuth();
+    const bizRef = getBusinessDocRef(cleanName);
+    const snap = await getDoc(bizRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.spreadsheetId) {
+        const cloudInfo: SpreadsheetInfo = {
+          spreadsheetId: data.spreadsheetId,
+          spreadsheetUrl: data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${data.spreadsheetId}`,
+          title: data.spreadsheetTitle || `${cleanName} - Management & Sales Log`,
+        };
+        localStorage.setItem(`gym_spreadsheet_${storeKey}`, JSON.stringify(cloudInfo));
+        return cloudInfo;
+      }
+    }
+    return localInfo;
+  } catch (e) {
+    console.warn('Error fetching store spreadsheet info:', e);
+    return null;
+  }
+}
+
+export async function dbSaveStoreSpreadsheet(businessName: string, info: SpreadsheetInfo): Promise<void> {
+  try {
+    const cleanName = (businessName || getStoredBusinessName() || 'Binti Gym').trim();
+    const storeKey = normalizeStoreKey(cleanName);
+    localStorage.setItem(`gym_spreadsheet_${storeKey}`, JSON.stringify(info));
+
+    await ensureFirebaseAuth();
+    const bizRef = getBusinessDocRef(cleanName);
+    await setDoc(
+      bizRef,
+      {
+        spreadsheetId: info.spreadsheetId,
+        spreadsheetUrl: info.spreadsheetUrl,
+        spreadsheetTitle: info.title,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('Error saving store spreadsheet info:', e);
+  }
+}
+
+export async function dbClearStoreSpreadsheet(businessName: string): Promise<void> {
+  try {
+    const cleanName = (businessName || getStoredBusinessName() || 'Binti Gym').trim();
+    const storeKey = normalizeStoreKey(cleanName);
+    localStorage.removeItem(`gym_spreadsheet_${storeKey}`);
+
+    await ensureFirebaseAuth();
+    const bizRef = getBusinessDocRef(cleanName);
+    await setDoc(
+      bizRef,
+      {
+        spreadsheetId: null,
+        spreadsheetUrl: null,
+        spreadsheetTitle: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (e) {
+    console.warn('Error clearing store spreadsheet info:', e);
+  }
 }
 
 // Backward-Compatibility Shims & Helpers

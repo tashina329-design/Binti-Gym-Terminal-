@@ -18,10 +18,8 @@ export const QuickRenewModal: React.FC<QuickRenewModalProps> = ({
   onClose,
   onConfirmRenew,
 }) => {
-  if (!member) return null;
-
-  const [planType, setPlanType] = useState(member.plan || 'Standard Monthly');
-  const [price, setPrice] = useState(member.plan === 'Student Monthly' ? 45.00 : 55.00);
+  const [planType, setPlanType] = useState(member?.plan || 'Standard Monthly');
+  const [price, setPrice] = useState(member?.plan === 'Student Monthly' ? 45.00 : 55.00);
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [loading, setLoading] = useState(false);
 
@@ -31,6 +29,8 @@ export const QuickRenewModal: React.FC<QuickRenewModalProps> = ({
       setPrice(member.plan === 'Student Monthly' ? 45.00 : 55.00);
     }
   }, [member]);
+
+  if (!member) return null;
 
   const handlePlanChange = (plan: string) => {
     setPlanType(plan);

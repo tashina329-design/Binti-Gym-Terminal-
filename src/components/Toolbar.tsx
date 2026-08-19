@@ -45,9 +45,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           type="button"
           onClick={onResetDatabase}
           className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
-          title="Reset database with standard demo seed data"
+          title="Reset database with demo seed records or clear to zero"
         >
-          <RotateCcw className="w-3.5 h-3.5" /> Reset Demo Seed
+          <RotateCcw className="w-3.5 h-3.5" /> Reset / Seed DB
         </button>
       </div>
     </div>

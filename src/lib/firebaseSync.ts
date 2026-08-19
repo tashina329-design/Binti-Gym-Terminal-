@@ -449,12 +449,25 @@ export function computeDashboardFromCollections(
   };
 }
 
+// Helper to clear a subcollection completely
+async function clearSubcollectionDocs(collRef: any) {
+  try {
+    const snap = await getDocs(collRef);
+    if (!snap.empty) {
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    }
+  } catch (e) {
+    console.warn('Subcollection cleanup warning:', e);
+  }
+}
+
 // Initial seed data populator for fresh stores in Firestore
-export async function seedInitialBusinessData(businessName: string, pin: string) {
+export async function seedInitialBusinessData(businessName: string, pin: string, clearFirst = true) {
   const bizRef = getBusinessDocRef(businessName);
   const cleanName = businessName.trim();
-  const dToday = new Date();
+  const todayDateStr = getBruneiTodayIsoDate();
 
+  const dToday = new Date();
   const d30DaysAgo = new Date(dToday);
   d30DaysAgo.setDate(dToday.getDate() - 30);
   const start30Ago = getBruneiTodayIsoDate(d30DaysAgo);
@@ -467,24 +480,53 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
   d30DaysLater.setDate(dToday.getDate() + 30);
   const end30Later = getBruneiTodayIsoDate(d30DaysLater);
 
+  const d365DaysLater = new Date(dToday);
+  d365DaysLater.setDate(dToday.getDate() + 365);
+  const end365Later = getBruneiTodayIsoDate(d365DaysLater);
+
   const d10DaysAgo = new Date(dToday);
   d10DaysAgo.setDate(dToday.getDate() - 10);
   const end10Ago = getBruneiTodayIsoDate(d10DaysAgo);
 
   const deviceId = getDeviceId();
 
+  const makeBruneiIso = (timeStr: string) => {
+    return new Date(`${todayDateStr}T${timeStr}:00+08:00`).toISOString();
+  };
+
   try {
+    if (clearFirst) {
+      await Promise.all([
+        clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'attendance')),
+        clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'sales')),
+        clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'expenses')),
+      ]);
+    }
+
     const promises: Promise<any>[] = [];
 
-    // 1. Create root business doc
+    // 1. Initial staff shift for today
+    const nowTime = getBruneiFormattedTime(new Date());
+    const demoShift: StaffShift = {
+      id: `shift-demo-${Date.now()}`,
+      staffName: 'System Admin',
+      shiftTitle: 'Morning Duty Shift',
+      startTime: nowTime,
+      startTimestamp: Date.now(),
+      startingFloat: 100,
+      notes: 'Initial demo duty shift with standard float',
+    };
+    saveStoredActiveShift(demoShift, cleanName);
+
+    // 2. Create root business doc
     promises.push(
       setDoc(
         bizRef,
         {
           name: cleanName,
-          pin: pin.trim(),
+          pin: (pin || '1234').trim(),
           staffPin: '123456',
-          activeShift: null,
+          activeShift: demoShift,
           availableStores: [cleanName],
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -494,12 +536,16 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
       )
     );
 
-    // 2. Seed members
+    // 3. Seed members
     const initialMembers = [
       { memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
       { memberId: 'MEM-204891', name: 'Siti Nurhaliza', phone: '8823456', plan: 'Student Monthly', startDate: start30Ago, endDate: end5Later, status: 'Expiring Soon' },
       { memberId: 'MEM-309123', name: 'Markus Vance', phone: '8934567', plan: 'Standard Monthly', startDate: '2026-05-01', endDate: end10Ago, status: 'Expired' },
       { memberId: 'MEM-401928', name: 'Jessica Tan', phone: '8765432', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
+      { memberId: 'MEM-501192', name: 'Hajah Maryam', phone: '8899112', plan: 'VIP Yearly', startDate: start30Ago, endDate: end365Later, status: 'Active' },
+      { memberId: 'MEM-602819', name: 'Mohammad Razi', phone: '8776655', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
+      { memberId: 'MEM-703412', name: 'Kevin Lim', phone: '8654321', plan: 'Student Monthly', startDate: start30Ago, endDate: end5Later, status: 'Expiring Soon' },
+      { memberId: 'MEM-804923', name: 'Dayang Faridah', phone: '8991234', plan: 'Standard Monthly', startDate: start30Ago, endDate: end30Later, status: 'Active' },
     ];
     const membersColl = getBusinessCollectionRef(cleanName, 'members');
     for (const m of initialMembers) {
@@ -517,11 +563,14 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
       );
     }
 
-    // 3. Seed attendance
+    // 4. Seed attendance for today
     const attColl = getBusinessCollectionRef(cleanName, 'attendance');
     const initialAttendance = [
-      { timestamp: new Date(Date.now() - 300000).toISOString(), memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', status: 'Active' },
-      { timestamp: new Date(Date.now() - 200000).toISOString(), memberId: 'GUEST', name: 'Michael Lee', phone: '-', plan: 'Walk-In Pass', status: 'Active' },
+      { timestamp: makeBruneiIso('08:30'), memberId: 'MEM-100241', name: 'Ahmad Daniel', phone: '8712345', plan: 'Standard Monthly', status: 'Active' },
+      { timestamp: makeBruneiIso('09:15'), memberId: 'MEM-401928', name: 'Jessica Tan', phone: '8765432', plan: 'Standard Monthly', status: 'Active' },
+      { timestamp: makeBruneiIso('10:00'), memberId: 'GUEST', name: 'Michael Lee', phone: '8123456', plan: 'Walk-In Pass', status: 'Active' },
+      { timestamp: makeBruneiIso('11:20'), memberId: 'MEM-602819', name: 'Mohammad Razi', phone: '8776655', plan: 'Standard Monthly', status: 'Active' },
+      { timestamp: makeBruneiIso('14:40'), memberId: 'MEM-804923', name: 'Dayang Faridah', phone: '8991234', plan: 'Standard Monthly', status: 'Active' },
     ];
     for (const a of initialAttendance) {
       promises.push(
@@ -534,12 +583,16 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
       );
     }
 
-    // 4. Seed sales
+    // 5. Seed sales for today
     const salesColl = getBusinessCollectionRef(cleanName, 'sales');
     const initialSales = [
-      { timestamp: new Date(Date.now() - 14400000).toISOString(), category: 'POS', customer: 'Energy Bar x2', paymentMethod: 'Cash', amount: 6, staff: 'System Admin' },
-      { timestamp: new Date(Date.now() - 10800000).toISOString(), category: 'Walk-In', customer: 'Michael Lee (Walk-In)', paymentMethod: 'BIBD QuickPay', amount: 10, staff: 'System Admin' },
-      { timestamp: new Date(Date.now() - 3600000).toISOString(), category: 'Personal Training', customer: 'Client: Ahmad Daniel | Trainer: Coach Alex | 5 Sessions', paymentMethod: 'Baiduri Card', amount: 150, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('08:45'), category: 'POS', customer: 'Energy Bar & Mineral Water', paymentMethod: 'Cash', amount: 8, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('09:30'), category: 'POS', customer: 'Whey Protein Shake 600ml', paymentMethod: 'BIBD QuickPay', amount: 5.5, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('10:00'), category: 'Walk-In', customer: 'Michael Lee (Walk-In Pass)', paymentMethod: 'Cash', amount: 10, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('11:00'), category: 'Personal Training', customer: 'Client: Ahmad Daniel | Trainer: Coach Alex | 5 Sessions', paymentMethod: 'Baiduri Card', amount: 150, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('13:15'), category: 'Classes', customer: 'HIIT Bootcamp (Dayang Faridah + 2 Guests)', paymentMethod: 'BIBD QuickPay', amount: 24, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('15:00'), category: 'Membership', customer: 'Jessica Tan - Standard Monthly Renewal', paymentMethod: 'Cash', amount: 50, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('16:30'), category: 'Walk-In', customer: 'Sarah Jenkins (Day Pass)', paymentMethod: 'Baiduri Card', amount: 10, staff: 'System Admin' },
     ];
     for (const s of initialSales) {
       promises.push(
@@ -552,40 +605,45 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
       );
     }
 
-    // 5. Seed expenses
+    // 6. Seed expenses for today
     const expColl = getBusinessCollectionRef(cleanName, 'expenses');
-    promises.push(
-      addDoc(expColl, {
-        timestamp: new Date(Date.now() - 7200000).toISOString(),
-        category: 'Utilities',
-        description: 'Water & Filter Restock',
-        paymentMethod: 'Cash',
-        amount: 45,
-        staff: 'System Admin',
-        deviceId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      })
-    );
-
-    // 6. Seed staff
-    const staffColl = getBusinessCollectionRef(cleanName, 'staff');
-    promises.push(
-      setDoc(
-        doc(staffColl, 'STF-101'),
-        {
-          id: 'STF-101',
-          name: 'System Admin',
-          phone: '8000000',
-          pin: '123456',
-          registeredAt: new Date().toISOString(),
+    const initialExpenses = [
+      { timestamp: makeBruneiIso('10:30'), category: 'Utilities', description: 'Mineral Water & Filter Restock', paymentMethod: 'Cash', amount: 35, staff: 'System Admin' },
+      { timestamp: makeBruneiIso('14:00'), category: 'Maintenance', description: 'Gym Sanitizer & Towel Supplies', paymentMethod: 'Cash', amount: 25, staff: 'System Admin' },
+    ];
+    for (const exp of initialExpenses) {
+      promises.push(
+        addDoc(expColl, {
+          ...exp,
           deviceId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      )
-    );
+        })
+      );
+    }
+
+    // 7. Seed staff
+    const staffColl = getBusinessCollectionRef(cleanName, 'staff');
+    const initialStaff = [
+      { id: 'STF-101', name: 'System Admin', phone: '8000000', pin: '123456' },
+      { id: 'STF-102', name: 'Coach Alex', phone: '8111222', pin: '112233' },
+      { id: 'STF-103', name: 'Sarah Jenkins', phone: '8333444', pin: '445566' },
+    ];
+    for (const stf of initialStaff) {
+      promises.push(
+        setDoc(
+          doc(staffColl, stf.id),
+          {
+            ...stf,
+            registeredAt: new Date().toISOString(),
+            deviceId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+      );
+    }
 
     // Run parallel seeding writes
     await Promise.all(promises);
@@ -603,7 +661,8 @@ export async function seedInitialBusinessData(businessName: string, pin: string)
       }
     }).catch(() => {});
   } catch (e) {
-    console.warn('Initial business data seeding background warning:', e);
+    console.warn('Initial business data seeding error:', e);
+    throw e;
   }
 }
 
@@ -1823,12 +1882,37 @@ export async function dbEndShift(businessName: string) {
 
 export async function dbResetDemoData(businessName: string) {
   await ensureFirebaseAuth();
+  const cleanName = (businessName || getStoredBusinessName() || 'Binti Gym').trim();
   const pin = getStoredBusinessPin();
-  await seedInitialBusinessData(businessName, pin);
-  await dbBroadcastEvent(businessName, {
+  await seedInitialBusinessData(cleanName, pin, true);
+  await dbBroadcastEvent(cleanName, {
     type: 'reset',
     title: '🔄 Database Reset',
     message: 'System database was reset to standard demo seed records in Firestore.',
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  });
+}
+
+export async function dbClearAllDataToZero(businessName: string) {
+  await ensureFirebaseAuth();
+  const cleanName = (businessName || getStoredBusinessName() || 'Binti Gym').trim();
+  const bizRef = getBusinessDocRef(cleanName);
+
+  // Clear active shift
+  saveStoredActiveShift(null, cleanName);
+  await setDoc(bizRef, { activeShift: null, updatedAt: serverTimestamp() }, { merge: true });
+
+  // Clear all transactional subcollections
+  await Promise.all([
+    clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'attendance')),
+    clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'sales')),
+    clearSubcollectionDocs(getBusinessCollectionRef(cleanName, 'expenses')),
+  ]);
+
+  await dbBroadcastEvent(cleanName, {
+    type: 'reset',
+    title: '🧹 Cleared to Zero',
+    message: 'All today transactions, attendances, and expenses have been reset to zero.',
     timestamp: getBruneiFormattedTime(new Date(), true),
   });
 }

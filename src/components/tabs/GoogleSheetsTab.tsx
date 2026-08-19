@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { User } from 'firebase/auth';
 import {
   FileSpreadsheet,
@@ -17,7 +17,13 @@ import {
   TrendingUp,
   CreditCard,
   Smartphone,
-  Coins
+  Coins,
+  Store,
+  Link2,
+  PlusCircle,
+  Unlink,
+  Settings2,
+  Check
 } from 'lucide-react';
 import {
   initAuth,
@@ -27,12 +33,20 @@ import {
 } from '../../lib/googleAuth';
 import {
   findOrCreateGymSpreadsheet,
+  createNewStoreSpreadsheet,
+  verifyAndGetSpreadsheetInfo,
+  extractSpreadsheetIdFromInput,
   syncDataToGoogleSheets,
   fetchMembersFromGoogleSheets,
   calculateDailySummaryMetrics,
   SpreadsheetInfo
 } from '../../lib/sheetsSync';
-import { dbBatchUpsertMembers } from '../../lib/firebaseSync';
+import {
+  dbBatchUpsertMembers,
+  dbGetStoreSpreadsheet,
+  dbSaveStoreSpreadsheet,
+  dbClearStoreSpreadsheet
+} from '../../lib/firebaseSync';
 import { DashboardData, Member } from '../../types';
 
 interface GoogleSheetsTabProps {
@@ -42,6 +56,7 @@ interface GoogleSheetsTabProps {
 }
 
 export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData, currentStore, onMembersImported }) => {
+  const effectiveStore = (currentStore || 'Binti Gym').trim();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -49,8 +64,13 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
   const [isLoadingSpreadsheet, setIsLoadingSpreadsheet] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isPullingMembers, setIsPullingMembers] = useState(false);
+  const [showConfigOptions, setShowConfigOptions] = useState(false);
+  const [customSheetInput, setCustomSheetInput] = useState('');
+  const [isSavingCustomSheet, setIsSavingCustomSheet] = useState(false);
+  const [isCreatingNewSheet, setIsCreatingNewSheet] = useState(false);
+
   const [lastSynced, setLastSynced] = useState<string | null>(() => {
-    return localStorage.getItem('last_sheets_sync_time');
+    return localStorage.getItem(`last_sheets_sync_time_${effectiveStore}`);
   });
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -63,35 +83,54 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
 
   const fmtCurrency = (val: number) => `$${(Number(val) || 0).toFixed(2)}`;
 
+  const loadSpreadsheetForStore = useCallback(async (accessToken: string, storeName: string, customId?: string) => {
+    setIsLoadingSpreadsheet(true);
+    setErrorMsg(null);
+    try {
+      // 1. Check if store already has a linked sheet in Firestore
+      const stored = await dbGetStoreSpreadsheet(storeName);
+      const targetId = customId || stored?.spreadsheetId;
+
+      const info = await findOrCreateGymSpreadsheet(accessToken, storeName, targetId);
+      setSpreadsheet(info);
+
+      // Save to Firestore so other terminals for this same store use the same sheet
+      await dbSaveStoreSpreadsheet(storeName, info);
+
+      // Load store-specific last sync time
+      const savedTime = localStorage.getItem(`last_sheets_sync_time_${storeName}`);
+      setLastSynced(savedTime || null);
+    } catch (err: any) {
+      console.error('Failed to load store spreadsheet:', err);
+      setErrorMsg(err.message || `Unable to access Google Drive/Sheets for ${storeName}. Please check permissions.`);
+    } finally {
+      setIsLoadingSpreadsheet(false);
+    }
+  }, []);
+
   // Initialize Auth state
   useEffect(() => {
     const unsubscribe = initAuth(
       (currentUser, accessToken) => {
         setUser(currentUser);
         setToken(accessToken);
-        loadSpreadsheet(accessToken);
+        loadSpreadsheetForStore(accessToken, effectiveStore);
       },
       () => {
         setUser(null);
         setToken(null);
+        setSpreadsheet(null);
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [effectiveStore, loadSpreadsheetForStore]);
 
-  const loadSpreadsheet = async (accessToken: string) => {
-    setIsLoadingSpreadsheet(true);
-    setErrorMsg(null);
-    try {
-      const info = await findOrCreateGymSpreadsheet(accessToken);
-      setSpreadsheet(info);
-    } catch (err: any) {
-      console.error('Failed to load spreadsheet:', err);
-      setErrorMsg(err.message || 'Unable to access Google Drive/Sheets. Please try signing in again.');
-    } finally {
-      setIsLoadingSpreadsheet(false);
+  // When store changes while signed in, reload the store's dedicated spreadsheet
+  useEffect(() => {
+    if (token) {
+      loadSpreadsheetForStore(token, effectiveStore);
     }
-  };
+  }, [effectiveStore, token, loadSpreadsheetForStore]);
 
   const handleSignIn = async () => {
     setIsSigningIn(true);
@@ -102,7 +141,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
       if (result) {
         setUser(result.user);
         setToken(result.accessToken);
-        await loadSpreadsheet(result.accessToken);
+        await loadSpreadsheetForStore(result.accessToken, effectiveStore);
       }
     } catch (err: any) {
       console.error('Login error:', err);
@@ -118,6 +157,75 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
     setToken(null);
     setSpreadsheet(null);
     setSuccessMsg('Signed out of Google Workspace.');
+  };
+
+  const handleCreateDedicatedStoreSheet = async () => {
+    let activeToken = token || getAccessToken();
+    if (!activeToken) {
+      setErrorMsg('Google session expired. Please sign in again.');
+      return;
+    }
+
+    setIsCreatingNewSheet(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const newSheet = await createNewStoreSpreadsheet(activeToken, effectiveStore);
+      setSpreadsheet(newSheet);
+      await dbSaveStoreSpreadsheet(effectiveStore, newSheet);
+      setSuccessMsg(`Created and connected new dedicated spreadsheet: "${newSheet.title}" for ${effectiveStore}!`);
+      setShowConfigOptions(false);
+    } catch (err: any) {
+      console.error('Failed to create dedicated sheet:', err);
+      setErrorMsg(err.message || 'Failed to create new spreadsheet.');
+    } finally {
+      setIsCreatingNewSheet(false);
+    }
+  };
+
+  const handleLinkCustomSheet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customSheetInput.trim()) return;
+
+    let activeToken = token || getAccessToken();
+    if (!activeToken) {
+      setErrorMsg('Google session expired. Please sign in again.');
+      return;
+    }
+
+    setIsSavingCustomSheet(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const cleanId = extractSpreadsheetIdFromInput(customSheetInput);
+      const verified = await verifyAndGetSpreadsheetInfo(activeToken, cleanId);
+      setSpreadsheet(verified);
+      await dbSaveStoreSpreadsheet(effectiveStore, verified);
+      setSuccessMsg(`Successfully linked custom spreadsheet: "${verified.title}" to ${effectiveStore}!`);
+      setCustomSheetInput('');
+      setShowConfigOptions(false);
+    } catch (err: any) {
+      console.error('Failed to link custom spreadsheet:', err);
+      setErrorMsg(err.message || 'Invalid spreadsheet ID or URL. Ensure your Google account has access to it.');
+    } finally {
+      setIsSavingCustomSheet(false);
+    }
+  };
+
+  const handleUnlinkStoreSheet = async () => {
+    let activeToken = token || getAccessToken();
+    if (!activeToken) return;
+
+    try {
+      await dbClearStoreSpreadsheet(effectiveStore);
+      setSpreadsheet(null);
+      setSuccessMsg(`Unlinked spreadsheet for ${effectiveStore}. You can now link or create a new sheet.`);
+      setShowConfigOptions(false);
+      // Re-find or create default
+      loadSpreadsheetForStore(activeToken, effectiveStore);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to unlink spreadsheet.');
+    }
   };
 
   const handleTriggerSync = () => {
@@ -151,8 +259,8 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
         second: '2-digit',
       });
       setLastSynced(nowStr);
-      localStorage.setItem('last_sheets_sync_time', nowStr);
-      setSuccessMsg(`Successfully pushed Daily & Monthly Summaries, sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
+      localStorage.setItem(`last_sheets_sync_time_${effectiveStore}`, nowStr);
+      setSuccessMsg(`Successfully pushed ${effectiveStore} data (Daily & Monthly Summaries, sales, check-ins, members, expenses) to "${spreadsheet.title}" at ${nowStr}!`);
     } catch (err: any) {
       console.error('Sync failed:', err);
       setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
@@ -182,8 +290,8 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
         return;
       }
 
-      const res = await dbBatchUpsertMembers(currentStore || 'Binti Gym', pulledMembers);
-      setSuccessMsg(`🎉 Successfully pulled from Google Sheets: Added ${res.added} new member(s) and updated ${res.updated} member(s)!`);
+      const res = await dbBatchUpsertMembers(effectiveStore, pulledMembers);
+      setSuccessMsg(`🎉 Successfully pulled from Google Sheets for ${effectiveStore}: Added ${res.added} new member(s) and updated ${res.updated} member(s)!`);
       if (onMembersImported) {
         onMembersImported(pulledMembers);
       }
@@ -197,7 +305,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
+      {/* Header Banner with Store Context */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
@@ -205,14 +313,20 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
               <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                Google Sheets Real-Time Sync
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
-                  Google Workspace
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  Google Sheets Real-Time Sync
+                </h2>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30 flex items-center gap-1">
+                  <Store className="w-3 h-3 text-emerald-400" />
+                  Terminal Store: {effectiveStore}
                 </span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Sync Daily Summary (Latest on Top), Monthly Financial Summary, Net Baiduri, Net BIBD, sales, check-ins, and expenses directly to Google Sheets.
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-medium border border-slate-700">
+                  Store-Isolated Sheets
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Every store terminal syncs to its own dedicated Google Sheet so data from different locations never conflict or overwrite each other.
               </p>
             </div>
           </div>
@@ -234,18 +348,17 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
             <button
               onClick={handleSignOut}
               title="Sign Out"
-              className="ml-2 p-2 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
+              className="ml-2 p-2 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         ) : (
           <div>
-            {/* Official Material Google Sign-In Button */}
             <button
               onClick={handleSignIn}
               disabled={isSigningIn}
-              className="flex items-center gap-3 px-4 py-2.5 bg-white text-slate-800 hover:bg-slate-100 font-bold rounded-xl text-xs shadow-md transition-all border border-slate-300 disabled:opacity-50"
+              className="flex items-center gap-3 px-4 py-2.5 bg-white text-slate-800 hover:bg-slate-100 font-bold rounded-xl text-xs shadow-md transition-all border border-slate-300 disabled:opacity-50 cursor-pointer"
             >
               <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
                 <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -282,12 +395,12 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
           </div>
           <h3 className="text-base font-bold text-white">Google Workspace Auth Required</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-            Connect your Google account to enable automatic cloud backup and live synchronization with Google Sheets. You will be able to view and manage your sales spreadsheets anytime in Google Drive.
+            Connect your Google account to enable live synchronization with Google Sheets for <strong className="text-white">{effectiveStore}</strong>. Each store maintains its own separate Google Spreadsheet in your Google Drive.
           </p>
           <button
             onClick={handleSignIn}
             disabled={isSigningIn}
-            className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-lg shadow-emerald-950/40 flex items-center gap-2 mx-auto"
+            className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-lg shadow-emerald-950/40 flex items-center gap-2 mx-auto cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
             {isSigningIn ? 'Connecting to Google...' : 'Connect Google Workspace Account'}
@@ -299,35 +412,128 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
           <div className="lg:col-span-2 space-y-6">
             {/* Spreadsheet Target Info */}
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Active Destination Spreadsheet
-                </h3>
-                {spreadsheet && (
-                  <a
-                    href={spreadsheet.spreadsheetUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors"
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Active Spreadsheet for {effectiveStore}
+                  </h3>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-emerald-500/30">
+                    Store-Specific
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowConfigOptions(!showConfigOptions)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" /> Open in Google Sheets
-                  </a>
-                )}
+                    <Settings2 className="w-3.5 h-3.5 text-slate-400" />
+                    {showConfigOptions ? 'Hide Sheet Settings' : 'Sheet Settings / Link Custom'}
+                  </button>
+                  {spreadsheet && (
+                    <a
+                      href={spreadsheet.spreadsheetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Open in Google Sheets
+                    </a>
+                  )}
+                </div>
               </div>
+
+              {/* Collapsible Store Spreadsheet Settings / Custom Link */}
+              {showConfigOptions && (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-4 text-xs animate-in fade-in">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                      <Settings2 className="w-4 h-4 text-emerald-400" /> Store Spreadsheet Configuration ({effectiveStore})
+                    </span>
+                    <span className="text-[11px] text-slate-400">Terminal isolation control</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Option 1: Create a brand new dedicated sheet */}
+                    <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2 flex flex-col justify-between">
+                      <div className="space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1.5">
+                          <PlusCircle className="w-4 h-4 text-emerald-400" /> Create New Dedicated Sheet
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Generates a brand new sheet named <strong className="text-slate-300">"{effectiveStore} - Management & Sales Log"</strong> in your Google Drive.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleCreateDedicatedStoreSheet}
+                        disabled={isCreatingNewSheet}
+                        className="mt-2 w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <PlusCircle className={`w-3.5 h-3.5 ${isCreatingNewSheet ? 'animate-spin' : ''}`} />
+                        {isCreatingNewSheet ? 'Creating Sheet...' : `Create Dedicated Sheet for ${effectiveStore}`}
+                      </button>
+                    </div>
+
+                    {/* Option 2: Link an existing custom sheet */}
+                    <form onSubmit={handleLinkCustomSheet} className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                      <div className="space-y-1">
+                        <p className="font-bold text-white flex items-center gap-1.5">
+                          <Link2 className="w-4 h-4 text-sky-400" /> Link Custom Google Sheet
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Paste your existing Google Sheet URL or Sheet ID to assign specifically to {effectiveStore}.
+                        </p>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <input
+                          type="text"
+                          placeholder="Paste Sheet URL or ID..."
+                          value={customSheetInput}
+                          onChange={(e) => setCustomSheetInput(e.target.value)}
+                          className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSavingCustomSheet || !customSheetInput.trim()}
+                          className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Link
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  {spreadsheet && (
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Current Sheet ID: <code className="text-slate-300">{spreadsheet.spreadsheetId}</code></span>
+                      <button
+                        onClick={handleUnlinkStoreSheet}
+                        className="text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Unlink className="w-3.5 h-3.5" /> Disconnect / Reset Link
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {isLoadingSpreadsheet ? (
                 <div className="p-6 bg-slate-950 rounded-xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" /> Fetching spreadsheet from Google Drive...
+                  <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" /> Fetching {effectiveStore}'s spreadsheet from Google Drive...
                 </div>
               ) : spreadsheet ? (
                 <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
                     <div>
-                      <p className="text-xs text-slate-400">Spreadsheet Name</p>
-                      <p className="text-sm font-bold text-white mt-0.5">{spreadsheet.title}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
+                          🏬 {effectiveStore}
+                        </span>
+                        <p className="text-xs text-slate-400">Connected Sheet Name</p>
+                      </div>
+                      <p className="text-sm font-bold text-white mt-1">{spreadsheet.title}</p>
                     </div>
                     <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold rounded-lg flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ready
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Active & Synced
                     </span>
                   </div>
 
@@ -337,7 +543,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                       <span className="font-semibold text-slate-200">Daily Summary, Monthly Summary, Sales, Check-Ins, Members, Expenses</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 block text-[11px]">Last Sync Status</span>
+                      <span className="text-slate-400 block text-[11px]">Last Sync Status ({effectiveStore})</span>
                       <span className="font-semibold text-emerald-400">
                         {lastSynced ? `Synced at ${lastSynced}` : 'Never synced'}
                       </span>
@@ -346,7 +552,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                 </div>
               ) : (
                 <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-300">
-                  No active spreadsheet found. Click "Sync Current Data" to generate a new spreadsheet in your Google Drive.
+                  No active spreadsheet found for {effectiveStore}. Click "Push Data to Google Sheets" to generate a dedicated spreadsheet in your Google Drive.
                 </div>
               )}
 
@@ -359,7 +565,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                     className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
                   >
                     <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? 'Pushing Data to Google Sheets...' : '📤 Push Data to Google Sheets'}
+                    {isSyncing ? `Pushing ${effectiveStore} Data...` : `📤 Push ${effectiveStore} Data to Sheets`}
                   </button>
 
                   <button
@@ -368,12 +574,12 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                     className="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-sky-950/40 cursor-pointer"
                   >
                     <Users className={`w-4 h-4 ${isPullingMembers ? 'animate-spin' : ''}`} />
-                    {isPullingMembers ? 'Importing from Sheet...' : '📥 Pull / Import Members from Sheet'}
+                    {isPullingMembers ? 'Importing from Sheet...' : `📥 Pull Members to ${effectiveStore}`}
                   </button>
                 </div>
 
                 <p className="text-[11px] text-slate-400">
-                  🔒 Safe & encrypted via Google Workspace OAuth API
+                  🔒 Dedicated sheet per store terminal
                 </p>
               </div>
 
@@ -386,7 +592,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                 <p className="text-[11px] text-slate-300 leading-relaxed">
                   You can type new members directly into your Google Sheet under the <strong className="text-white">"Members Directory"</strong> tab.
                   Columns: <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Member ID</code> (optional), <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Full Name</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Phone</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Plan</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Start Date</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">End Date</code>.
-                  Then click <strong className="text-sky-400">"📥 Pull / Import Members from Sheet"</strong> to sync them into your app!
+                  Then click <strong className="text-sky-400">"📥 Pull Members to {effectiveStore}"</strong> to sync them into your app!
                 </p>
               </div>
             </div>
@@ -394,7 +600,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
             {/* Sync Content Payload Stats */}
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
               <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-                <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload to Sync
+                <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload for {effectiveStore}
               </h3>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -429,11 +635,11 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
             </div>
           </div>
 
-          {/* Right Column: Live Daily Summary Report Preview (Matching User Screenshot Layout) */}
+          {/* Right Column: Live Daily Summary Report Preview */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 className="text-xs font-bold text-white flex items-center gap-2">
-                <Eye className="w-4 h-4 text-emerald-400" /> Daily Summary Report Format
+                <Eye className="w-4 h-4 text-emerald-400" /> Daily Summary Report ({effectiveStore})
               </h3>
               <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-600/30 px-2 py-0.5 rounded">
                 Live Preview
@@ -563,24 +769,24 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
               </div>
               <div>
                 <h3 className="text-base font-bold text-white">Confirm Google Sheets Sync</h3>
-                <p className="text-xs text-slate-400">Google Drive & Sheets Integration</p>
+                <p className="text-xs text-slate-400">Terminal: {effectiveStore}</p>
               </div>
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-              Are you sure you want to sync the formatted <strong>Daily Summary</strong> and <strong>Monthly Financial Summary</strong> (with Net Baiduri & Net BIBD, latest on top), along with sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
+              Are you sure you want to sync <strong>{effectiveStore}</strong>'s data (formatted <strong>Daily Summary</strong>, <strong>Monthly Financial Summary</strong>, sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses) to your dedicated Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 onClick={() => setShowConfirmModal(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={executeSync}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-950/40"
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-950/40 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" /> Confirm & Sync Now
               </button>

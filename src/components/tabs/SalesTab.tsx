@@ -9,7 +9,7 @@ interface SalesTabProps {
   onDeleteExpense?: (record: ExpenseRecord & { index?: number }) => void;
   onEditSale?: (
     record: SalesRecord & { index?: number },
-    updates: { paymentMethod: string; amount: number; category?: string; customer?: string }
+    updates: { paymentMethod: string; amount: number; category?: string; customer?: string; phone?: string }
   ) => void;
   onEditAttendance?: (
     record: AttendanceRecord & { index?: number },
@@ -36,6 +36,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
   const [saleAmount, setSaleAmount] = useState('');
   const [saleCategory, setSaleCategory] = useState('');
   const [saleCustomer, setSaleCustomer] = useState('');
+  const [salePhone, setSalePhone] = useState('');
 
   const [editingAttendance, setEditingAttendance] = useState<(AttendanceRecord & { index?: number }) | null>(null);
   const [attPlan, setAttPlan] = useState('');
@@ -65,6 +66,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
     setSaleAmount(String(s.amount || '0'));
     setSaleCategory(s.category || 'POS');
     setSaleCustomer(s.customer || '');
+    setSalePhone(s.phone && s.phone !== '-' ? s.phone : '');
   };
 
   const handleSaveSale = (e: React.FormEvent) => {
@@ -76,6 +78,7 @@ export const SalesTab: React.FC<SalesTabProps> = ({
       amount: isNaN(numAmt) ? 0 : Math.max(0, numAmt),
       category: saleCategory.trim(),
       customer: saleCustomer.trim(),
+      phone: salePhone.trim() || '-',
     });
     setEditingSale(null);
   };
@@ -206,7 +209,14 @@ export const SalesTab: React.FC<SalesTabProps> = ({
                         {s.category}
                       </span>
                     </td>
-                    <td className="p-3 font-medium text-slate-200">{s.customer}</td>
+                    <td className="p-3">
+                      <div className="font-medium text-slate-200">{s.customer}</div>
+                      {s.phone && s.phone !== '-' && (
+                        <div className="text-[11px] text-sky-400 font-mono flex items-center gap-1 mt-0.5">
+                          <span>📞 {s.phone}</span>
+                        </div>
+                      )}
+                    </td>
                     <td className="p-3">
                       <span className="font-semibold text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/60">
                         {s.payment}
@@ -422,6 +432,17 @@ export const SalesTab: React.FC<SalesTabProps> = ({
                   onChange={(e) => setSaleCustomer(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-medium focus:outline-none focus:border-amber-500"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Phone Number (Optional / Walk-in)</label>
+                <input
+                  type="tel"
+                  value={salePhone}
+                  onChange={(e) => setSalePhone(e.target.value)}
+                  placeholder="e.g. 8712345"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
                 />
               </div>
 

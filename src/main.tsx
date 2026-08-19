@@ -1,8 +1,10 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App, { App as NamedApp } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
+
+const AppComponent = App || NamedApp;
 
 // Guard against third-party extension errors (e.g. MetaMask, Ethereum providers, Web3 injection)
 if (typeof window !== 'undefined') {
@@ -43,7 +45,7 @@ if (typeof window !== 'undefined') {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <AppComponent />
     </ErrorBoundary>
   </StrictMode>,
 );

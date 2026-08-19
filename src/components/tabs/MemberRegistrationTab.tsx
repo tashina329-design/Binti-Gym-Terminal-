@@ -1,5 +1,20 @@
-import React, { useState } from 'react';
-import { Search, UserPlus, Zap, Trash2, CheckCircle2, FileSpreadsheet } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import {
+  Search,
+  UserPlus,
+  Zap,
+  Trash2,
+  CheckCircle2,
+  FileSpreadsheet,
+  AlertTriangle,
+  Copy,
+  Filter,
+  Layers,
+  ArrowRight,
+  ShieldAlert,
+  UserCheck,
+  Users
+} from 'lucide-react';
 import { DashboardData, Member } from '../../types';
 
 interface MemberRegistrationTabProps {
@@ -17,6 +32,15 @@ interface MemberRegistrationTabProps {
   onDeleteMember?: (memberId: string) => void;
 }
 
+// Phone & name normalization helpers for duplicate matching
+const normalizePhone = (p: string = '') => {
+  return p.replace(/[\s\-\(\)\+]/g, '').replace(/^673/, '').trim();
+};
+
+const normalizeName = (n: string = '') => {
+  return n.toLowerCase().replace(/\s+/g, ' ').trim();
+};
+
 export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   data,
   onRegisterMember,
@@ -24,6 +48,7 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   onDeleteMember,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterView, setFilterView] = useState<'all' | 'duplicates'>('all');
   
   // Form fields
   const [name, setName] = useState('');
@@ -41,15 +66,126 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [ignoreDuplicateWarning, setIgnoreDuplicateWarning] = useState(false);
 
   const handlePlanChange = (plan: string) => {
     setPlanType(plan);
     setPrice(plan === 'Student Monthly' ? 45.00 : 55.00);
   };
 
+  // Real-time duplicate detection in the active registration form
+  const formDuplicateMatches = useMemo(() => {
+    const rawPhone = phone.trim();
+    const rawName = name.trim();
+    const normPhone = normalizePhone(rawPhone);
+    const normName = normalizeName(rawName);
+
+    if ((!normPhone || normPhone.length < 4) && (!normName || normName.length < 3)) {
+      return [];
+    }
+
+    const matches: { member: Member; reason: 'phone' | 'name' | 'both' }[] = [];
+    const seen = new Set<string>();
+
+    for (const m of data.members || []) {
+      const mNormPhone = normalizePhone(m.phone);
+      const mNormName = normalizeName(m.name);
+
+      const phoneMatch = normPhone.length >= 4 && (mNormPhone === normPhone || mNormPhone.includes(normPhone) || normPhone.includes(mNormPhone));
+      const nameMatch = normName.length >= 3 && mNormName === normName;
+
+      if (phoneMatch && nameMatch) {
+        if (!seen.has(m.memberId)) {
+          seen.add(m.memberId);
+          matches.push({ member: m, reason: 'both' });
+        }
+      } else if (phoneMatch) {
+        if (!seen.has(m.memberId)) {
+          seen.add(m.memberId);
+          matches.push({ member: m, reason: 'phone' });
+        }
+      } else if (nameMatch) {
+        if (!seen.has(m.memberId)) {
+          seen.add(m.memberId);
+          matches.push({ member: m, reason: 'name' });
+        }
+      }
+    }
+
+    return matches;
+  }, [name, phone, data.members]);
+
+  // Directory-wide duplicate detection
+  const duplicatePhoneMap = useMemo(() => {
+    const map = new Map<string, Member[]>();
+    for (const m of data.members || []) {
+      const norm = normalizePhone(m.phone);
+      if (norm && norm.length >= 4) {
+        if (!map.has(norm)) map.set(norm, []);
+        map.get(norm)!.push(m);
+      }
+    }
+    return map;
+  }, [data.members]);
+
+  const duplicateNameMap = useMemo(() => {
+    const map = new Map<string, Member[]>();
+    for (const m of data.members || []) {
+      const norm = normalizeName(m.name);
+      if (norm && norm.length >= 2) {
+        if (!map.has(norm)) map.set(norm, []);
+        map.get(norm)!.push(m);
+      }
+    }
+    return map;
+  }, [data.members]);
+
+  const duplicateMemberMap = useMemo(() => {
+    const dupMap = new Map<string, { member: Member; reasons: string[] }>();
+
+    duplicatePhoneMap.forEach((members) => {
+      if (members.length > 1) {
+        members.forEach((m) => {
+          if (!dupMap.has(m.memberId)) {
+            dupMap.set(m.memberId, { member: m, reasons: ['Phone'] });
+          } else {
+            const entry = dupMap.get(m.memberId)!;
+            if (!entry.reasons.includes('Phone')) entry.reasons.push('Phone');
+          }
+        });
+      }
+    });
+
+    duplicateNameMap.forEach((members) => {
+      if (members.length > 1) {
+        members.forEach((m) => {
+          if (!dupMap.has(m.memberId)) {
+            dupMap.set(m.memberId, { member: m, reasons: ['Name'] });
+          } else {
+            const entry = dupMap.get(m.memberId)!;
+            if (!entry.reasons.includes('Name')) entry.reasons.push('Name');
+          }
+        });
+      }
+    });
+
+    return dupMap;
+  }, [duplicatePhoneMap, duplicateNameMap]);
+
+  const duplicateMembersCount = duplicateMemberMap.size;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !phone.trim() || price < 0) return;
+
+    // If there's a strong duplicate match and user hasn't opted to ignore
+    if (formDuplicateMatches.length > 0 && !ignoreDuplicateWarning) {
+      const primaryDup = formDuplicateMatches[0].member;
+      const confirmProceed = window.confirm(
+        `⚠️ DUPLICATE WARNING:\n\nA member named "${primaryDup.name}" with phone "${primaryDup.phone}" already exists in the system!\n\nClick OK if you want to proceed and register as a separate duplicate entry, or Cancel to review/renew.`
+      );
+      if (!confirmProceed) return;
+    }
 
     setLoading(true);
     setSuccessMsg(null);
@@ -66,6 +202,7 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
       setSuccessMsg(`Member registered! ${name} (${planType} - $${price.toFixed(2)}) is now active.`);
       setName('');
       setPhone('');
+      setIgnoreDuplicateWarning(false);
       setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('Failed to register member: ' + (err.message || err));
@@ -74,72 +211,147 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
     }
   };
 
-  const filteredMembers = searchQuery.trim()
-    ? (data.members || []).filter(
-        (m) =>
-          m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          m.phone.includes(searchQuery.trim())
-      )
-    : [];
-
   const getBadgeStyle = (status: string) => {
-    if (status === 'Expiring Soon') return 'bg-amber-950/80 text-amber-300 border border-amber-700/50';
-    if (status === 'Expired') return 'bg-rose-950/80 text-rose-300 border border-rose-700/50';
+    const s = (status || '').toLowerCase();
+    if (s === 'expiring soon') return 'bg-amber-950/80 text-amber-300 border border-amber-700/50';
+    if (s === 'expired') return 'bg-rose-950/80 text-rose-300 border border-rose-700/50';
     return 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/50';
   };
 
+  // Search and filter logic
+  const filteredMembers = useMemo(() => {
+    let list = data.members || [];
+
+    if (filterView === 'duplicates') {
+      list = list.filter((m) => duplicateMemberMap.has(m.memberId));
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const qPhone = normalizePhone(searchQuery);
+      list = list.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          m.phone.includes(searchQuery.trim()) ||
+          (qPhone && normalizePhone(m.phone).includes(qPhone)) ||
+          (m.memberId && m.memberId.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [data.members, filterView, searchQuery, duplicateMemberMap]);
+
   return (
     <div className="space-y-6">
-      {/* Search Bar */}
+      {/* Search Bar & Duplicates Quick Filter */}
       <div>
-        <h3 className="text-base font-semibold text-slate-200 mb-2 flex items-center gap-2">
-          <Search className="w-4 h-4 text-emerald-400" /> Search Member Directory
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+          <h3 className="text-base font-semibold text-slate-200 flex items-center gap-2">
+            <Search className="w-4 h-4 text-emerald-400" /> Search Member Directory
+          </h3>
+
+          {/* Quick Filters */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setFilterView('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                filterView === 'all'
+                  ? 'bg-slate-800 text-white border border-slate-600 shadow-sm'
+                  : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              All Members ({data.members ? data.members.length : 0})
+            </button>
+
+            <button
+              onClick={() => setFilterView('duplicates')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                filterView === 'duplicates'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
+                  : duplicateMembersCount > 0
+                  ? 'bg-amber-950/40 text-amber-400 hover:bg-amber-900/50 border border-amber-700/40 animate-pulse'
+                  : 'bg-slate-900/60 text-slate-500 border border-slate-800'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Duplicates Only ({duplicateMembersCount})
+            </button>
+          </div>
+        </div>
+
         <div className="relative max-w-xl">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="🔍 Search by name or phone..."
+            placeholder="🔍 Search by name, phone (e.g. 8712345), or Member ID..."
             className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2.5 pl-10 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
           <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-2.5 text-xs text-slate-500 hover:text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
         </div>
 
-        {/* Search Results */}
+        {/* Search Results Dropdown when user is actively typing a search */}
         {searchQuery.trim() !== '' && (
           <div className="mt-3 space-y-2 max-w-xl">
             {filteredMembers.length > 0 ? (
-              filteredMembers.map((m) => (
-                <div
-                  key={m.memberId}
-                  className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 shadow-md"
-                >
-                  <div>
-                    <div className="font-bold text-slate-100 text-sm">{m.name}</div>
-                    <div className="text-xs text-slate-400 font-mono mt-0.5">
-                      {m.phone} | {m.plan}
+              filteredMembers.slice(0, 5).map((m) => {
+                const isDup = duplicateMemberMap.has(m.memberId);
+                const dupInfo = duplicateMemberMap.get(m.memberId);
+                return (
+                  <div
+                    key={m.memberId}
+                    className={`bg-slate-900 border ${
+                      isDup ? 'border-amber-500/40 bg-amber-950/10' : 'border-slate-800'
+                    } p-3.5 rounded-xl flex items-center justify-between gap-3 shadow-md`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-100 text-sm">{m.name}</span>
+                        {m.memberId && (
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                            #{m.memberId}
+                          </span>
+                        )}
+                        {isDup && (
+                          <span className="text-[10px] font-semibold text-amber-300 bg-amber-950 px-1.5 py-0.5 rounded border border-amber-600/40 flex items-center gap-1">
+                            <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                            Duplicate ({dupInfo?.reasons.join(' & ')})
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400 font-mono mt-0.5">
+                        {m.phone} | {m.plan}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Start: {m.startDate || '-'} | Renew: <span className="text-slate-300 font-medium">{m.endDate}</span>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
-                      Start: {m.startDate} | Renew: <span className="text-slate-300 font-medium">{m.endDate}</span>
-                    </div>
-                  </div>
 
-                  <div className="text-right">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getBadgeStyle(m.status)}`}>
-                      {m.status}
-                    </span>
-                    <div className="mt-2">
-                      <button
-                        onClick={() => onOpenRenewModal(m)}
-                        className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded transition-colors flex items-center gap-1 ml-auto"
-                      >
-                        <Zap className="w-3 h-3" /> Quick Renew
-                      </button>
+                    <div className="text-right shrink-0">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getBadgeStyle(m.status)}`}>
+                        {m.status}
+                      </span>
+                      <div className="mt-2">
+                        <button
+                          onClick={() => onOpenRenewModal(m)}
+                          className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded transition-colors flex items-center gap-1 ml-auto cursor-pointer"
+                        >
+                          <Zap className="w-3 h-3" /> Quick Renew
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <p className="text-xs text-slate-500 italic p-2">No matching members found.</p>
             )}
@@ -150,10 +362,91 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
       <hr className="border-slate-800" />
 
       {/* New Member Registration Form */}
-      <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-lg">
-        <h3 className="text-base font-semibold text-slate-200 mb-4 flex items-center gap-2">
-          <UserPlus className="w-4 h-4 text-emerald-400" /> New Member Registration
-        </h3>
+      <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-lg space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="text-base font-semibold text-slate-200 flex items-center gap-2">
+            <UserPlus className="w-4 h-4 text-emerald-400" /> New Member Registration
+          </h3>
+          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+            <UserCheck className="w-3.5 h-3.5 text-emerald-400" /> Live duplicate protection active
+          </span>
+        </div>
+
+        {/* Live Duplicate Warning Box in Registration Form */}
+        {formDuplicateMatches.length > 0 && (
+          <div className="p-4 bg-amber-950/40 border border-amber-500/50 rounded-xl space-y-3 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between flex-wrap gap-2 border-b border-amber-800/40 pb-2">
+              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-400 animate-bounce" />
+                <span>⚠️ Duplicate Member Found ({formDuplicateMatches.length} existing record{formDuplicateMatches.length > 1 ? 's' : ''})</span>
+              </div>
+              <span className="text-[10px] text-amber-300/80 bg-amber-900/60 px-2 py-0.5 rounded font-mono font-bold uppercase">
+                Matching {formDuplicateMatches[0].reason === 'both' ? 'Phone & Name' : formDuplicateMatches[0].reason === 'phone' ? 'Phone Number' : 'Name'}
+              </span>
+            </div>
+
+            <p className="text-xs text-amber-200/90 leading-relaxed">
+              A member with this {formDuplicateMatches[0].reason === 'phone' ? 'phone number' : formDuplicateMatches[0].reason === 'name' ? 'name' : 'phone number and name'} already exists in the system. You can <strong>Quick Renew</strong> their existing membership instead of creating a duplicate record:
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {formDuplicateMatches.map(({ member, reason }) => (
+                <div
+                  key={member.memberId}
+                  className="p-3 bg-slate-950/90 border border-amber-600/40 rounded-xl flex items-center justify-between gap-3 shadow-inner"
+                >
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white text-xs">{member.name}</span>
+                      {member.memberId && (
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                          #{member.memberId}
+                        </span>
+                      )}
+                      <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${getBadgeStyle(member.status)}`}>
+                        {member.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      📞 {member.phone} | {member.plan}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Expiry: <strong className="text-slate-200">{member.endDate}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onOpenRenewModal(member)}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shrink-0 shadow cursor-pointer"
+                  >
+                    <Zap className="w-3.5 h-3.5" /> Quick Renew
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-1 flex items-center justify-between text-[11px] text-amber-400/80">
+              <span>Tip: To extend or renew an existing member, click "Quick Renew" above.</span>
+              <label className="flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={ignoreDuplicateWarning}
+                  onChange={(e) => setIgnoreDuplicateWarning(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 focus:ring-0"
+                />
+                <span>Allow separate registration anyway</span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="p-3 bg-emerald-950/40 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
@@ -244,21 +537,61 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm rounded-lg transition-colors disabled:opacity-50"
+              className={`w-full py-2.5 font-bold text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer ${
+                formDuplicateMatches.length > 0 && !ignoreDuplicateWarning
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+              }`}
             >
-              {loading ? 'Registering...' : 'Register & Save Sale'}
+              {loading
+                ? 'Registering...'
+                : formDuplicateMatches.length > 0 && !ignoreDuplicateWarning
+                ? 'Register Duplicate Anyway'
+                : 'Register & Save Sale'}
             </button>
           </div>
         </form>
       </div>
 
       {/* Members Directory Table */}
-      <div>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+      <div className="space-y-3">
+        {/* Banner if duplicates detected in whole directory */}
+        {duplicateMembersCount > 0 && filterView !== 'duplicates' && (
+          <div className="p-3.5 bg-amber-950/30 border border-amber-500/40 rounded-xl flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 text-amber-300">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                <strong>{duplicateMembersCount} duplicate member record{duplicateMembersCount > 1 ? 's' : ''}</strong> detected in directory (sharing same phone number or full name).
+              </span>
+            </div>
+            <button
+              onClick={() => setFilterView('duplicates')}
+              className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer flex items-center gap-1"
+            >
+              <Filter className="w-3 h-3" /> View Duplicates
+            </button>
+          </div>
+        )}
+
+        {filterView === 'duplicates' && (
+          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-xs">
+            <span className="text-amber-300 font-bold flex items-center gap-1.5">
+              <Filter className="w-3.5 h-3.5" /> Showing {filteredMembers.length} Duplicate Member Records
+            </span>
+            <button
+              onClick={() => setFilterView('all')}
+              className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
+            >
+              Show all members
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-slate-200">Registered Members List</h3>
             <span className="text-xs font-mono text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-700/50 font-bold">
-              {data.members ? data.members.length : 0} members
+              {filteredMembers.length} displayed
             </span>
           </div>
           <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
@@ -266,10 +599,12 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
             <span>Adding via Google Sheet? Go to <strong className="text-slate-200">Google Sheets tab</strong> & click <strong className="text-sky-400">"📥 Pull / Import Members"</strong> to sync.</span>
           </p>
         </div>
+
         <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
+                <th className="p-3">Member ID</th>
                 <th className="p-3">Name</th>
                 <th className="p-3">Phone</th>
                 <th className="p-3">Plan</th>
@@ -280,52 +615,72 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {data.members && data.members.length > 0 ? (
-                (searchQuery.trim()
-                  ? data.members.filter(
-                      (m) =>
-                        m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        m.phone.includes(searchQuery.trim())
-                    )
-                  : data.members
-                ).map((m) => (
-                  <tr key={m.memberId} className="hover:bg-slate-800/50 transition-colors">
-                    <td className="p-3 font-bold text-slate-100">{m.name}</td>
-                    <td className="p-3 font-mono text-slate-400">{m.phone}</td>
-                    <td className="p-3 text-slate-300">{m.plan}</td>
-                    <td className="p-3 text-slate-400">{m.startDate || '-'}</td>
-                    <td className="p-3 font-semibold text-slate-200">{m.endDate}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getBadgeStyle(m.status)}`}>
-                        {m.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="inline-flex items-center gap-1.5 justify-end">
-                        <button
-                          onClick={() => onOpenRenewModal(m)}
-                          className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded font-bold text-[11px] transition-colors inline-flex items-center gap-1"
-                          title="Quick renew membership"
-                        >
-                          <Zap className="w-3 h-3" /> Renew
-                        </button>
-                        {onDeleteMember && (
+              {filteredMembers.length > 0 ? (
+                filteredMembers.map((m) => {
+                  const isDup = duplicateMemberMap.has(m.memberId);
+                  const dupInfo = duplicateMemberMap.get(m.memberId);
+
+                  return (
+                    <tr
+                      key={m.memberId}
+                      className={`hover:bg-slate-800/50 transition-colors ${
+                        isDup ? 'bg-amber-950/20 hover:bg-amber-950/30' : ''
+                      }`}
+                    >
+                      <td className="p-3 font-mono text-slate-400 text-[11px]">
+                        <span className="bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                          #{m.memberId || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold text-slate-100">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{m.name}</span>
+                          {isDup && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-0.5">
+                              <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                              Duplicate {dupInfo?.reasons.join('+')}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 font-mono text-slate-300 font-medium">{m.phone}</td>
+                      <td className="p-3 text-slate-300">{m.plan}</td>
+                      <td className="p-3 text-slate-400">{m.startDate || '-'}</td>
+                      <td className="p-3 font-semibold text-slate-200">{m.endDate}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getBadgeStyle(m.status)}`}>
+                          {m.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <div className="inline-flex items-center gap-1.5 justify-end">
                           <button
-                            onClick={() => onDeleteMember(m.memberId)}
-                            className="p-1.5 text-rose-400 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 rounded-lg transition-colors"
-                            title="Delete member record"
+                            onClick={() => onOpenRenewModal(m)}
+                            className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded font-bold text-[11px] transition-colors inline-flex items-center gap-1 cursor-pointer"
+                            title="Quick renew membership"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Zap className="w-3 h-3" /> Renew
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          {onDeleteMember && (
+                            <button
+                              onClick={() => onDeleteMember(m.memberId)}
+                              className="p-1.5 text-rose-400 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete redundant duplicate record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={7} className="p-4 text-center text-slate-500 italic">
-                    No registered members found.
+                  <td colSpan={8} className="p-6 text-center text-slate-500 italic">
+                    {filterView === 'duplicates'
+                      ? 'No duplicate members found! All member records are unique.'
+                      : 'No registered members found.'}
                   </td>
                 </tr>
               )}

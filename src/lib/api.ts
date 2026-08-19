@@ -27,6 +27,7 @@ import {
   dbStartShift,
   dbEndShift,
   dbResetDemoData,
+  dbClearAllDataToZero,
   broadcastLiveSync,
   subscribeLiveSync,
   fetchCloudStore,

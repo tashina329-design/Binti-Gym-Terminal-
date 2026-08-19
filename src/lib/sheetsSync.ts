@@ -486,7 +486,7 @@ function mergeDailySummariesLatestOnTop(
 
   for (const row of existingRows) {
     const colA = (row[0] || '').trim();
-    const colB = row[1] !== undefined ? row[1] : '';
+    let colB: string | number = row[1] !== undefined ? row[1] : '';
 
     // Check if this row marks the start of a report block
     if (colA.startsWith('REPORT FOR ') && currentBlock.length > 0) {
@@ -497,6 +497,15 @@ function mergeDailySummariesLatestOnTop(
     // Ignore old legacy table headers
     if (colA === 'Metric' && colB === 'Value') continue;
     if (colA === 'Report Date') continue;
+
+    // Sanitize any previous date-formatted 0 values from older syncs
+    if (
+      (colA === 'New Membership Sign-ups' || colA === 'Walk-In Entries') &&
+      typeof colB === 'string' &&
+      (colB === '1899-12-31' || colB === '1899-12-30' || colB.startsWith('1899-'))
+    ) {
+      colB = 0;
+    }
 
     currentBlock.push([colA, colB]);
   }
@@ -696,6 +705,19 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+    // Rows 2 & 3: New Membership Sign-ups & Walk-In Entries - Explicit Number Format #,##0 (Prevents date display bug)
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 1, endRowIndex: 3, startColumnIndex: 1, endColumnIndex: 2 },
+        cell: {
+          userEnteredFormat: {
+            numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+            horizontalAlignment: 'RIGHT',
+          },
+        },
+        fields: 'userEnteredFormat(numberFormat,horizontalAlignment)',
       },
     },
     // Row 4: --- INCOME (PAYMENT IN) --- Green Banner #16A34A

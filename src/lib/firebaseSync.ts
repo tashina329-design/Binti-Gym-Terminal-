@@ -332,6 +332,7 @@ export function computeDashboardFromCollections(
         time: getBruneiFormattedTime(isNaN(d.getTime()) ? undefined : d),
         category,
         customer,
+        phone: s.phone || '',
         payment: paymentRaw,
         amount,
         staff: s.staff || 'Duty Staff',
@@ -1650,7 +1651,7 @@ export async function dbRenewMember(
   }).catch((e) => console.warn('Broadcast notice:', e));
 }
 
-export async function dbUpdateSale(businessName: string, saleData: any, updates: { paymentMethod?: string; amount?: number; category?: string; customer?: string }) {
+export async function dbUpdateSale(businessName: string, saleData: any, updates: { paymentMethod?: string; amount?: number; category?: string; customer?: string; phone?: string }) {
   await ensureFirebaseAuth();
   const salesColl = getBusinessCollectionRef(businessName, 'sales');
   let updatedDocId = saleData.id;

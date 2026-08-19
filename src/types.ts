@@ -25,6 +25,7 @@ export interface SalesRecord {
   timestamp?: string;
   category: string;
   customer: string;
+  phone?: string;
   payment: string;
   amount: number;
   staff?: string;

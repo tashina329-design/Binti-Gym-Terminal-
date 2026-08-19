@@ -28,22 +28,27 @@ import {
 import {
   findOrCreateGymSpreadsheet,
   syncDataToGoogleSheets,
+  fetchMembersFromGoogleSheets,
   calculateDailySummaryMetrics,
   SpreadsheetInfo
 } from '../../lib/sheetsSync';
-import { DashboardData } from '../../types';
+import { dbBatchUpsertMembers } from '../../lib/firebaseSync';
+import { DashboardData, Member } from '../../types';
 
 interface GoogleSheetsTabProps {
   dashboardData: DashboardData;
+  currentStore?: string;
+  onMembersImported?: (members: Member[]) => void;
 }
 
-export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData }) => {
+export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData, currentStore, onMembersImported }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [spreadsheet, setSpreadsheet] = useState<SpreadsheetInfo | null>(null);
   const [isLoadingSpreadsheet, setIsLoadingSpreadsheet] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPullingMembers, setIsPullingMembers] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(() => {
     return localStorage.getItem('last_sheets_sync_time');
   });
@@ -153,6 +158,40 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
       setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handlePullMembers = async () => {
+    let activeToken = token;
+    if (!activeToken) {
+      activeToken = getAccessToken();
+    }
+    if (!activeToken || !spreadsheet) {
+      setErrorMsg('Please connect your Google Account first.');
+      return;
+    }
+
+    setIsPullingMembers(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const pulledMembers = await fetchMembersFromGoogleSheets(activeToken, spreadsheet.spreadsheetId);
+      if (pulledMembers.length === 0) {
+        setSuccessMsg('No member rows found in "Members Directory" tab of your Google Sheet.');
+        return;
+      }
+
+      const res = await dbBatchUpsertMembers(currentStore || 'Binti Gym', pulledMembers);
+      setSuccessMsg(`🎉 Successfully pulled from Google Sheets: Added ${res.added} new member(s) and updated ${res.updated} member(s)!`);
+      if (onMembersImported) {
+        onMembersImported(pulledMembers);
+      }
+    } catch (err: any) {
+      console.error('Failed to pull members:', err);
+      setErrorMsg(err.message || 'Failed to pull members from Google Sheet.');
+    } finally {
+      setIsPullingMembers(false);
     }
   };
 
@@ -311,19 +350,43 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData 
                 </div>
               )}
 
-              {/* Sync Controls */}
-              <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  onClick={handleTriggerSync}
-                  disabled={isSyncing || !spreadsheet}
-                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                  {isSyncing ? 'Pushing Data to Google Sheets...' : 'Sync Current Data to Google Sheets'}
-                </button>
+              {/* Sync & Two-Way Import Controls */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleTriggerSync}
+                    disabled={isSyncing || !spreadsheet}
+                    className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? 'Pushing Data to Google Sheets...' : '📤 Push Data to Google Sheets'}
+                  </button>
+
+                  <button
+                    onClick={handlePullMembers}
+                    disabled={isPullingMembers || !spreadsheet}
+                    className="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-sky-950/40 cursor-pointer"
+                  >
+                    <Users className={`w-4 h-4 ${isPullingMembers ? 'animate-spin' : ''}`} />
+                    {isPullingMembers ? 'Importing from Sheet...' : '📥 Pull / Import Members from Sheet'}
+                  </button>
+                </div>
 
                 <p className="text-[11px] text-slate-400">
                   🔒 Safe & encrypted via Google Workspace OAuth API
+                </p>
+              </div>
+
+              {/* Two-way Member Sync Quick Guide */}
+              <div className="p-3.5 bg-sky-950/30 border border-sky-500/20 rounded-xl space-y-1.5">
+                <p className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                  Two-Way Member Sync Supported!
+                </p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  You can type new members directly into your Google Sheet under the <strong className="text-white">"Members Directory"</strong> tab.
+                  Columns: <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Member ID</code> (optional), <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Full Name</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Phone</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Plan</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Start Date</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">End Date</code>.
+                  Then click <strong className="text-sky-400">"📥 Pull / Import Members from Sheet"</strong> to sync them into your app!
                 </p>
               </div>
             </div>

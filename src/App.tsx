@@ -1,1425 +1,593 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Trash2, AlertTriangle, Lock, Play, UserCheck, Bell, X, AlertCircle, Monitor } from 'lucide-react';
-import { Header } from './components/Header';
-import { Toolbar } from './components/Toolbar';
-import { StatsGrid } from './components/StatsGrid';
-import { NavigationTabs, TabId } from './components/NavigationTabs';
-import { SalesTab } from './components/tabs/SalesTab';
-import { PhoneCheckinTab } from './components/tabs/PhoneCheckinTab';
-import { PosTab } from './components/tabs/PosTab';
-import { ClassesTab } from './components/tabs/ClassesTab';
-import { PersonalTrainerTab } from './components/tabs/PersonalTrainerTab';
-import { WalkInTab } from './components/tabs/WalkInTab';
-import { MemberRegistrationTab } from './components/tabs/MemberRegistrationTab';
-import { ExpenseTab } from './components/tabs/ExpenseTab';
-import { QrPosterTab } from './components/tabs/QrPosterTab';
-import { GoogleSheetsTab } from './components/tabs/GoogleSheetsTab';
-import { QuickRenewModal } from './components/QuickRenewModal';
-import { EntranceCheckInView } from './components/EntranceCheckInView';
-import { StaffShiftModal } from './components/StaffShiftModal';
-import { BusinessAuthModal } from './components/BusinessAuthModal';
-import { playSelfCheckinNotificationSound } from './lib/soundNotification';
+import React, { useState, useEffect, useMemo } from 'react';
+import { User } from 'firebase/auth';
 import {
-  subscribeFirestoreBusiness,
-  dbCheckInPhone,
-  dbCheckInId,
-  dbRecordWalkIn,
-  dbRecordPOS,
-  dbRecordClass,
-  dbRecordPTIn,
-  dbRecordPTOut,
-  dbRecordExpense,
-  dbRegisterMember,
-  dbRenewMember,
-  dbDeleteSale,
-  dbDeleteAttendance,
-  dbDeleteExpense,
-  dbDeleteMember,
-  dbUpdateSale,
-  dbUpdateAttendance,
-  dbUpdateExpense,
-  dbStartShift,
-  dbEndShift,
-  dbResetDemoData,
-  fetchStoresFromCloud,
-  getBruneiTodayIsoDate,
-  SyncEventPayload,
-} from './lib/firebaseSync';
+  FileSpreadsheet,
+  RefreshCw,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle,
+  ShieldCheck,
+  LogOut,
+  Sparkles,
+  Calendar,
+  Users,
+  DollarSign,
+  ClipboardList,
+  Eye,
+  TrendingUp,
+  CreditCard,
+  Smartphone,
+  Coins
+} from 'lucide-react';
+import {
+  initAuth,
+  googleSignIn,
+  googleSignOut,
+  getAccessToken
+} from '../../lib/googleAuth';
+import {
+  findOrCreateGymSpreadsheet,
+  syncDataToGoogleSheets,
+  fetchMembersFromGoogleSheets,
+  calculateDailySummaryMetrics,
+  SpreadsheetInfo
+} from '../../lib/sheetsSync';
+import { dbBatchUpsertMembers } from '../../lib/firebaseSync';
+import { DashboardData, Member } from '../../types';
 
-import { DashboardData, Member, CheckInResponse, StaffShift, PushNotification } from './types';
-
-function getStoredActiveShift(businessName?: string): StaffShift | null {
-  try {
-    const clean = (businessName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
-    const stored = localStorage.getItem(`gym_active_shift_${clean}`);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed && typeof parsed === 'object' && parsed.staffName) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to get stored active shift:', e);
-  }
-  return null;
+interface GoogleSheetsTabProps {
+  dashboardData: DashboardData;
+  currentStore?: string;
+  onMembersImported?: (members: Member[]) => void;
 }
 
-function saveStoredActiveShift(shift: StaffShift | null, businessName?: string) {
-  try {
-    const clean = (businessName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_') || 'binti_gym';
-    if (shift) {
-      localStorage.setItem(`gym_active_shift_${clean}`, JSON.stringify(shift));
-    } else {
-      localStorage.removeItem(`gym_active_shift_${clean}`);
-    }
-  } catch (e) {
-    console.warn('Failed to save stored active shift:', e);
-  }
-}
-
-export default function App() {
-  const getTodayIsoDate = () => getBruneiTodayIsoDate();
-
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayIsoDate());
-  const [activeTab, setActiveTab] = useState<TabId>('sales');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isCheckinMode, setIsCheckinMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      return params.get('p') === 'checkin' || params.get('mode') === 'checkin' || window.location.hash === '#checkin';
-    }
-    return false;
+export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData, currentStore, onMembersImported }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [spreadsheet, setSpreadsheet] = useState<SpreadsheetInfo | null>(null);
+  const [isLoadingSpreadsheet, setIsLoadingSpreadsheet] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isPullingMembers, setIsPullingMembers] = useState(false);
+  const [lastSynced, setLastSynced] = useState<string | null>(() => {
+    return localStorage.getItem('last_sheets_sync_time');
   });
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const [syncStatus, setSyncStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
+  // Compute live Daily Summary Report metrics
+  const summaryMetrics = useMemo(() => {
+    return calculateDailySummaryMetrics(dashboardData);
+  }, [dashboardData]);
 
-  // Listen for URL parameter changes or hash changes for QR Code entrance terminal
+  const fmtCurrency = (val: number) => `$${(Number(val) || 0).toFixed(2)}`;
+
+  // Initialize Auth state
   useEffect(() => {
-    const checkUrlMode = () => {
-      if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('p') === 'checkin' || params.get('mode') === 'checkin' || window.location.hash === '#checkin') {
-          setIsCheckinMode(true);
-        }
-      }
-    };
-
-    checkUrlMode();
-    window.addEventListener('popstate', checkUrlMode);
-    window.addEventListener('hashchange', checkUrlMode);
-    return () => {
-      window.removeEventListener('popstate', checkUrlMode);
-      window.removeEventListener('hashchange', checkUrlMode);
-    };
-  }, []);
-
-  // Multi-Store Terminal State (persisted in localStorage)
-  const [currentBusinessName, setCurrentBusinessName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('current_business_name') || '';
-    } catch {
-      return '';
-    }
-  });
-
-  const [currentBusinessPin, setCurrentBusinessPin] = useState<string>(() => {
-    try {
-      return localStorage.getItem('current_business_pin') || '';
-    } catch {
-      return '';
-    }
-  });
-
-  const [showBusinessAuthModal, setShowBusinessAuthModal] = useState<boolean>(
-    () => !currentBusinessName || !currentBusinessPin
-  );
-
-  const [currentStore, setCurrentStore] = useState<string>(() => {
-    return currentBusinessName || localStorage.getItem('current_store_name') || 'Binti Gym';
-  });
-
-  const [availableStores, setAvailableStores] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('gym_available_stores');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
-  });
-
-  useEffect(() => {
-    fetchStoresFromCloud().then((stores) => {
-      if (stores && stores.length > 0) {
-        setAvailableStores(stores);
-        try {
-          localStorage.setItem('gym_available_stores', JSON.stringify(stores));
-        } catch {}
-      }
-    });
-  }, []);
-
-  const handleBusinessAuthenticated = (bizName: string, pin: string) => {
-    setCurrentBusinessName(bizName);
-    setCurrentBusinessPin(pin);
-    setCurrentStore(bizName);
-    try {
-      localStorage.setItem('current_store_name', bizName);
-      localStorage.setItem('current_business_name', bizName);
-      localStorage.setItem('current_business_pin', pin);
-    } catch {}
-    setShowBusinessAuthModal(false);
-  };
-
-  const handleLogout = () => {
-    setCurrentBusinessName('');
-    setCurrentBusinessPin('');
-    try {
-      localStorage.removeItem('current_business_name');
-      localStorage.removeItem('current_business_pin');
-      localStorage.removeItem('current_store_name');
-    } catch {}
-    setShowBusinessAuthModal(true);
-  };
-
-  // Terminal Push Notifications State
-  const [notifications, setNotifications] = useState<PushNotification[]>(() => {
-    try {
-      const stored = localStorage.getItem('gym_terminal_notifications');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [activePushBanner, setActivePushBanner] = useState<PushNotification | null>(null);
-  const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(() => {
-    try {
-      const stored = localStorage.getItem('gym_sound_enabled');
-      return stored !== null ? stored === 'true' : true;
-    } catch {
-      return true;
-    }
-  });
-
-  const toggleSound = () => {
-    setIsSoundEnabled((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('gym_sound_enabled', String(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const handleClearNotifications = () => {
-    setNotifications([]);
-    try {
-      localStorage.removeItem('gym_terminal_notifications');
-    } catch {}
-  };
-
-  const handleClearNotificationItem = (id: string) => {
-    setNotifications((prev) => {
-      const filtered = prev.filter((n) => n.id !== id);
-      try {
-        localStorage.setItem('gym_terminal_notifications', JSON.stringify(filtered));
-      } catch {}
-      return filtered;
-    });
-  };
-
-  const triggerSelfCheckinNotification = (
-    title: string,
-    message: string,
-    memberName?: string,
-    memberId?: string,
-    type: 'checkin' | 'walkin' | 'expired' | 'blocked' | 'info' = 'checkin'
-  ) => {
-    const timeStr = new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    });
-
-    const newNotif: PushNotification = {
-      id: 'notif-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      title,
-      message,
-      timestamp: timeStr,
-      memberName,
-      memberId,
-      type,
-      read: false,
-    };
-
-    // Sound chime notification if enabled
-    if (isSoundEnabled) {
-      if (type === 'expired' || type === 'blocked') {
-        playSelfCheckinNotificationSound('expired');
-      } else if (type === 'walkin') {
-        playSelfCheckinNotificationSound('sale');
-      } else {
-        playSelfCheckinNotificationSound('checkin');
-      }
-    }
-
-    setNotifications((prev) => {
-      const updated = [newNotif, ...prev.slice(0, 49)];
-      try {
-        localStorage.setItem('gym_terminal_notifications', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-    setActivePushBanner(newNotif);
-
-    // Auto dismiss banner after 6s (or 8s for expired warning)
-    const timeoutDuration = type === 'expired' || type === 'blocked' ? 8000 : 6000;
-    setTimeout(() => {
-      setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
-    }, timeoutDuration);
-  };
-
-  const handleTestNotification = () => {
-    triggerSelfCheckinNotification(
-      'Self Check-In (Test)',
-      'Member test check-in processed successfully. Cloud database synchronized.',
-      'Ahmad Syazwan (Test Member)',
-      'MEM-099',
-      'checkin'
-    );
-  };
-
-  const [activeShift, setActiveShift] = useState<StaffShift | null>(() => getStoredActiveShift(currentStore));
-  const [showShiftModal, setShowShiftModal] = useState<boolean>(false);
-  const [dismissShiftBanner, setDismissShiftBanner] = useState<boolean>(false);
-
-  // Quick renew modal state
-  const [renewMember, setRenewMember] = useState<Member | null>(null);
-
-  // Delete confirmation modal state
-  const [deleteTarget, setDeleteTarget] = useState<{
-    type: 'sale' | 'attendance' | 'expense' | 'member';
-    title: string;
-    subtitle: string;
-    data: any;
-  } | null>(null);
-
-  // Dashboard Data State
-  const [dashboardData, setDashboardData] = useState<DashboardData>({
-    totalRevenue: 0,
-    totalExpenses: 0,
-    netIncome: 0,
-    posSalesTotal: 0,
-    classSalesTotal: 0,
-    ptSalesTotal: 0,
-    ptPayoutTotal: 0,
-    walkInSalesTotal: 0,
-    membershipSalesTotal: 0,
-    checkinCount: 0,
-    expiringCount: 0,
-    todayAttendance: [],
-    todaySales: [],
-    todayExpenses: [],
-    members: [],
-    cashIn: 0,
-    cashOut: 0,
-    baiduriIn: 0,
-    bibdIn: 0,
-    ptDetails: [],
-    viewDate: getTodayIsoDate(),
-  });
-
-  // Real-Time Firestore Single Source of Truth Subscription
-  useEffect(() => {
-    if (!currentStore) return;
-
-    const unsubscribe = subscribeFirestoreBusiness(
-      currentStore,
-      (liveDashboard: DashboardData, eventData?: SyncEventPayload, isRemote?: boolean) => {
-        setDashboardData(liveDashboard);
-        if (liveDashboard.store?.activeShift !== undefined) {
-          setActiveShift(liveDashboard.store.activeShift);
-        }
-        if (liveDashboard.store?.availableStores && liveDashboard.store.availableStores.length > 0) {
-          setAvailableStores(liveDashboard.store.availableStores);
-        }
-
-        // If change came from another device/terminal in real-time, play audio chime & show notification
-        if (isRemote && eventData) {
-          const title = eventData.title || '⚡ Live Cloud Sync Alert';
-          const message = eventData.message || 'Data updated in real time from another terminal.';
-          const timeStr =
-            eventData.timestamp ||
-            new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: true,
-            });
-
-          const isExpiredEvent =
-            eventData.type === 'expired' ||
-            eventData.type === 'blocked' ||
-            title.toLowerCase().includes('expired') ||
-            message.toLowerCase().includes('expired');
-
-          if (isSoundEnabled) {
-            playSelfCheckinNotificationSound(
-              isExpiredEvent ? 'expired' : eventData.type === 'pos' || eventData.type === 'walkin' ? 'sale' : 'checkin'
-            );
-          }
-
-          const newNotif: PushNotification = {
-            id: 'notif-' + Date.now(),
-            title,
-            message,
-            timestamp: timeStr,
-            memberName: eventData.memberName,
-            memberId: eventData.memberId,
-            type: isExpiredEvent ? 'expired' : eventData.type === 'walkin' ? 'walkin' : 'checkin',
-            read: false,
-          };
-
-          setNotifications((prev) => [newNotif, ...prev]);
-          setActivePushBanner(newNotif);
-
-          const bannerTimeout = isExpiredEvent ? 8000 : 6000;
-          setTimeout(() => {
-            setActivePushBanner((current) => (current?.id === newNotif.id ? null : current));
-          }, bannerTimeout);
-        }
+    const unsubscribe = initAuth(
+      (currentUser, accessToken) => {
+        setUser(currentUser);
+        setToken(accessToken);
+        loadSpreadsheet(accessToken);
       },
-      (status) => {
-        setSyncStatus(status);
-      },
-      selectedDate
+      () => {
+        setUser(null);
+        setToken(null);
+      }
     );
-
     return () => unsubscribe();
-  }, [currentStore, selectedDate, isSoundEnabled]);
+  }, []);
 
-  // Handler functions
-  const handleDateChange = (date: string) => {
-    setSelectedDate(date);
-  };
-
-  const handleResetToday = () => {
-    const today = getTodayIsoDate();
-    setSelectedDate(today);
-  };
-
-  const handleResetDatabase = async () => {
-    if (!window.confirm('Reset Firestore database to standard demo seed records?')) return;
-    setIsRefreshing(true);
+  const loadSpreadsheet = async (accessToken: string) => {
+    setIsLoadingSpreadsheet(true);
+    setErrorMsg(null);
     try {
-      await dbResetDemoData(currentStore);
+      const info = await findOrCreateGymSpreadsheet(accessToken);
+      setSpreadsheet(info);
     } catch (err: any) {
-      alert('Error resetting database: ' + (err.message || err));
+      console.error('Failed to load spreadsheet:', err);
+      setErrorMsg(err.message || 'Unable to access Google Drive/Sheets. Please try signing in again.');
     } finally {
-      setIsRefreshing(false);
+      setIsLoadingSpreadsheet(false);
     }
   };
 
-  // Check-In API calls
-  const handleCheckinPhone = async (phone: string): Promise<CheckInResponse> => {
+  const handleSignIn = async () => {
+    setIsSigningIn(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
     try {
-      const result = await dbCheckInPhone(currentStore, phone);
-      if (result.isExpired) {
-        const matchedMember = result.members?.[0];
-        const name = matchedMember?.fullName || 'Member';
-        triggerSelfCheckinNotification(
-          '🚫 Check-In Blocked (Expired)',
-          result.message || `Check-in blocked: ${name}'s membership is EXPIRED. Current status is Expired.`,
-          name,
-          matchedMember?.memberId,
-          'expired'
-        );
-      } else if (result.success && !result.multiple) {
-        const matchedMember = result.members?.[0];
-        const name = matchedMember?.fullName || 'Member';
-        triggerSelfCheckinNotification(
-          '🔔 Member Check-In',
-          `Welcome back, ${name}! (${currentStore})`,
-          name,
-          matchedMember?.memberId,
-          'checkin'
-        );
-      }
-      return result;
-    } catch (err: any) {
-      return { success: false, message: err.message || 'Check-in failed.' };
-    }
-  };
-
-  const handleCheckinId = async (memberId: string): Promise<CheckInResponse> => {
-    try {
-      const result = await dbCheckInId(currentStore, memberId);
-      if (result.isExpired) {
-        const matchedMember = result.members?.[0];
-        const name = matchedMember?.fullName || `Member #${memberId}`;
-        triggerSelfCheckinNotification(
-          '🚫 Check-In Blocked (Expired)',
-          result.message || `Check-in blocked: ${name}'s membership is EXPIRED. Current status is Expired.`,
-          name,
-          memberId,
-          'expired'
-        );
-      } else if (result.success) {
-        const matchedMember = result.members?.[0];
-        const name = matchedMember?.fullName || `Member #${memberId}`;
-        triggerSelfCheckinNotification(
-          '🔔 Member Check-In',
-          `Welcome back, ${name}! (${currentStore})`,
-          name,
-          memberId,
-          'checkin'
-        );
-      }
-      return result;
-    } catch (err: any) {
-      return { success: false, message: err.message || 'Check-in failed.' };
-    }
-  };
-
-  // Optimistic UI updates helper for immediate 0ms responsiveness
-  const addOptimisticSale = (sale: any) => {
-    setDashboardData((prev) => {
-      const newTodaySales = [sale, ...prev.todaySales];
-      const amount = Number(sale.amount) || 0;
-      const isIncome = sale.category !== 'PT Out';
-
-      const newTotalRevenue = isIncome ? prev.totalRevenue + amount : prev.totalRevenue;
-      const newNetIncome = prev.netIncome + (isIncome ? amount : -amount);
-
-      let newCashIn = prev.cashIn;
-      let newBaiduriIn = prev.baiduriIn;
-      let newBibdIn = prev.bibdIn;
-
-      if (sale.paymentMethod === 'Cash') newCashIn += amount;
-      if (sale.paymentMethod === 'Baiduri' || sale.paymentMethod === 'Card') newBaiduriIn += amount;
-      if (sale.paymentMethod === 'BIBD' || sale.paymentMethod === 'Online') newBibdIn += amount;
-
-      let posSalesTotal = prev.posSalesTotal;
-      let classSalesTotal = prev.classSalesTotal;
-      let ptSalesTotal = prev.ptSalesTotal;
-      let ptPayoutTotal = prev.ptPayoutTotal;
-      let walkInSalesTotal = prev.walkInSalesTotal;
-      let membershipSalesTotal = prev.membershipSalesTotal;
-
-      if (sale.category === 'POS') posSalesTotal += amount;
-      else if (sale.category === 'Class') classSalesTotal += amount;
-      else if (sale.category === 'PT In') ptSalesTotal += amount;
-      else if (sale.category === 'PT Out') ptPayoutTotal += amount;
-      else if (sale.category === 'Walk-In') walkInSalesTotal += amount;
-      else if (sale.category === 'Membership' || sale.category === 'Renewal') membershipSalesTotal += amount;
-
-      return {
-        ...prev,
-        todaySales: newTodaySales,
-        totalRevenue: newTotalRevenue,
-        netIncome: newNetIncome,
-        cashIn: newCashIn,
-        baiduriIn: newBaiduriIn,
-        bibdIn: newBibdIn,
-        posSalesTotal,
-        classSalesTotal,
-        ptSalesTotal,
-        ptPayoutTotal,
-        walkInSalesTotal,
-        membershipSalesTotal,
-      };
-    });
-  };
-
-  const addOptimisticExpense = (expense: any) => {
-    setDashboardData((prev) => {
-      const newTodayExpenses = [expense, ...prev.todayExpenses];
-      const amount = Number(expense.amount) || 0;
-      const newTotalExpenses = prev.totalExpenses + amount;
-      const newNetIncome = prev.netIncome - amount;
-      const newCashOut = expense.paymentMethod === 'Cash' ? prev.cashOut + amount : prev.cashOut;
-
-      return {
-        ...prev,
-        todayExpenses: newTodayExpenses,
-        totalExpenses: newTotalExpenses,
-        netIncome: newNetIncome,
-        cashOut: newCashOut,
-      };
-    });
-  };
-
-  // Transaction Actions (Direct Firestore Subcollection Writes with 0ms Optimistic UI)
-  const handleRecordWalkIn = async (data: { name: string; phone?: string; amount: number; paymentMethod: string }) => {
-    if (!activeShift && !isCheckinMode) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'Walk-In',
-      customer: data.name ? `${data.name} (Walk-in)` : 'Walk-In Guest',
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-
-    if (isCheckinMode) {
-      triggerSelfCheckinNotification(
-        '🔔 Walk-In Pass Check-In Alert',
-        `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
-        data.name
-      );
-    } else {
-      setActiveTab('sales');
-    }
-
-    dbRecordWalkIn(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync walk-in to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRecordPOS = async (data: { itemName: string; qty: number; amount: number; paymentMethod: string }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'POS',
-      customer: `${data.itemName} x${data.qty}`,
-      itemName: data.itemName,
-      qty: Number(data.qty) || 1,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRecordPOS(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync POS sale to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRecordClass = async (data: { className: string; clientName: string; amount: number; paymentMethod: string }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'Class',
-      customer: `${data.clientName} (${data.className})`,
-      className: data.className,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRecordClass(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync class sale to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRecordPTIn = async (data: { trainerName: string; clientName: string; sessions: string; amount: number; paymentMethod: string }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'PT In',
-      customer: `${data.clientName} (Coach ${data.trainerName})`,
-      trainerName: data.trainerName,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRecordPTIn(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync PT sale to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRecordPTOut = async (data: { trainerName: string; description: string; amount: number; paymentMethod: string }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'PT Out',
-      customer: `Payout: Coach ${data.trainerName}`,
-      trainerName: data.trainerName,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRecordPTOut(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync PT payout to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRecordExpense = async (data: { category: string; description: string; amount: number; paymentMethod: string }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optExp = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: data.category,
-      description: data.description,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.amount) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticExpense(optExp);
-    setActiveTab('sales');
-
-    dbRecordExpense(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync expense to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleRegisterMember = async (data: {
-    name: string;
-    phone: string;
-    planType: string;
-    price: number;
-    startDate: string;
-    endDate: string;
-    paymentMethod: string;
-  }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optMemberId = 'MEM' + String(Math.floor(1000 + Math.random() * 9000));
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'Membership',
-      customer: `${data.name} (#${optMemberId} - ${data.planType})`,
-      memberId: optMemberId,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.price) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    setDashboardData((prev) => ({
-      ...prev,
-      members: [
-        {
-          memberId: optMemberId,
-          name: data.name,
-          phone: data.phone,
-          plan: data.planType,
-          startDate: data.startDate,
-          endDate: data.endDate,
-          status: 'active' as const,
-        },
-        ...prev.members,
-      ],
-    }));
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRegisterMember(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync member registration to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  const handleConfirmRenew = async (data: {
-    memberId: string;
-    planType: string;
-    price: number;
-    paymentMethod: string;
-  }) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return dashboardData;
-    }
-
-    const now = new Date();
-    const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
-    const optSale = {
-      id: 'opt_' + Date.now(),
-      timestamp,
-      category: 'Renewal',
-      customer: `Renewal #${data.memberId} (${data.planType})`,
-      memberId: data.memberId,
-      paymentMethod: data.paymentMethod || 'Cash',
-      amount: Number(data.price) || 0,
-      staff: activeShift?.staffName || 'Duty Staff',
-    };
-
-    addOptimisticSale(optSale);
-    setActiveTab('sales');
-
-    dbRenewMember(currentStore, {
-      ...data,
-      viewDate: selectedDate,
-      staff: activeShift?.staffName || 'Duty Staff',
-    }).catch((err) => {
-      console.error('Failed to sync renewal to cloud:', err);
-    });
-
-    return dashboardData;
-  };
-
-  // Deletion Handlers triggering custom confirmation modal
-  const handleDeleteSale = (record: any) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return;
-    }
-    setDeleteTarget({
-      type: 'sale',
-      title: 'Delete Income Record',
-      subtitle: `Are you sure you want to delete "${record.customer || record.category}" ($${Number(record.amount || 0).toFixed(2)})?`,
-      data: record,
-    });
-  };
-
-  const handleDeleteAttendance = (record: any) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return;
-    }
-    setDeleteTarget({
-      type: 'attendance',
-      title: 'Delete Attendance Log',
-      subtitle: `Are you sure you want to delete check-in log for "${record.name}" (${record.phone})?`,
-      data: record,
-    });
-  };
-
-  const handleDeleteExpense = (record: any) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return;
-    }
-    setDeleteTarget({
-      type: 'expense',
-      title: 'Delete Expense Record',
-      subtitle: `Are you sure you want to delete expense "${record.description || record.category}" ($${Number(record.amount || 0).toFixed(2)})?`,
-      data: record,
-    });
-  };
-
-  const handleDeleteMember = (memberId: string) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return;
-    }
-    const member = dashboardData.members?.find((m) => m.memberId === memberId);
-    const nameStr = member ? member.name : memberId;
-    setDeleteTarget({
-      type: 'member',
-      title: 'Delete Member Record',
-      subtitle: `Are you sure you want to delete registered member "${nameStr}"? This action cannot be undone.`,
-      data: { memberId },
-    });
-  };
-
-  const executeDelete = async () => {
-    if (!deleteTarget) return;
-    const { type, data } = deleteTarget;
-    setDeleteTarget(null);
-
-    try {
-      if (type === 'sale') {
-        await dbDeleteSale(currentStore, data);
-      } else if (type === 'attendance') {
-        await dbDeleteAttendance(currentStore, data);
-      } else if (type === 'expense') {
-        await dbDeleteExpense(currentStore, data);
-      } else if (type === 'member') {
-        await dbDeleteMember(currentStore, data.memberId || data);
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        setToken(result.accessToken);
+        await loadSpreadsheet(result.accessToken);
       }
     } catch (err: any) {
-      console.error('Delete error in Firestore:', err);
+      console.error('Login error:', err);
+      setErrorMsg(err.message || 'Google Sign-In failed or was cancelled.');
+    } finally {
+      setIsSigningIn(false);
     }
   };
 
-  // Edit Handlers with Optimistic Updates & Firestore Sync
-  const handleEditSale = async (
-    record: any,
-    updates: { paymentMethod: string; amount: number; category?: string; customer?: string }
-  ) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
+  const handleSignOut = async () => {
+    await googleSignOut();
+    setUser(null);
+    setToken(null);
+    setSpreadsheet(null);
+    setSuccessMsg('Signed out of Google Workspace.');
+  };
+
+  const handleTriggerSync = () => {
+    if (!token || !spreadsheet) {
+      setErrorMsg('Please connect your Google Account first.');
+      return;
+    }
+    setShowConfirmModal(true);
+  };
+
+  const executeSync = async () => {
+    setShowConfirmModal(false);
+    let activeToken = token;
+    if (!activeToken) {
+      activeToken = getAccessToken();
+    }
+    if (!activeToken || !spreadsheet) {
+      setErrorMsg('Google session expired. Please sign in again.');
       return;
     }
 
-    setDashboardData((prev) => {
-      const oldAmount = Number(record.amount) || 0;
-      const newAmount = Number(updates.amount) || 0;
-      const amountDiff = newAmount - oldAmount;
-
-      const oldPayment = (record.payment || record.paymentMethod || '').toLowerCase();
-      const newPayment = (updates.paymentMethod || '').toLowerCase();
-
-      let cashInDiff = 0;
-      let baiduriInDiff = 0;
-      let bibdInDiff = 0;
-
-      // Remove old amount from old payment bucket
-      if (oldPayment.includes('cash')) cashInDiff -= oldAmount;
-      else if (oldPayment.includes('baiduri')) baiduriInDiff -= oldAmount;
-      else if (oldPayment.includes('bibd')) bibdInDiff -= oldAmount;
-
-      // Add new amount to new payment bucket
-      if (newPayment.includes('cash')) cashInDiff += newAmount;
-      else if (newPayment.includes('baiduri')) baiduriInDiff += newAmount;
-      else if (newPayment.includes('bibd')) bibdInDiff += newAmount;
-
-      const updatedTodaySales = prev.todaySales.map((s, i) => {
-        if ((record.id && s.id === record.id) || (record.index !== undefined && i === record.index)) {
-          return {
-            ...s,
-            payment: updates.paymentMethod,
-            amount: newAmount,
-            category: updates.category || s.category,
-            customer: updates.customer || s.customer,
-          };
-        }
-        return s;
-      });
-
-      return {
-        ...prev,
-        todaySales: updatedTodaySales,
-        totalRevenue: prev.totalRevenue + amountDiff,
-        netIncome: prev.netIncome + amountDiff,
-        cashIn: Math.max(0, prev.cashIn + cashInDiff),
-        baiduriIn: Math.max(0, prev.baiduriIn + baiduriInDiff),
-        bibdIn: Math.max(0, prev.bibdIn + bibdInDiff),
-      };
-    });
+    setIsSyncing(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
-      await dbUpdateSale(currentStore, record, updates);
-    } catch (err) {
-      console.error('Failed to update sale in cloud:', err);
+      await syncDataToGoogleSheets(activeToken, spreadsheet.spreadsheetId, dashboardData);
+      const nowStr = new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      setLastSynced(nowStr);
+      localStorage.setItem('last_sheets_sync_time', nowStr);
+      setSuccessMsg(`Successfully pushed Daily & Monthly Summaries, sales, check-ins, members, & expenses to Google Sheets at ${nowStr}!`);
+    } catch (err: any) {
+      console.error('Sync failed:', err);
+      setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
-  const handleEditAttendance = async (
-    record: any,
-    updates: { plan: string; status: string; name?: string; phone?: string }
-  ) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
+  const handlePullMembers = async () => {
+    let activeToken = token;
+    if (!activeToken) {
+      activeToken = getAccessToken();
+    }
+    if (!activeToken || !spreadsheet) {
+      setErrorMsg('Please connect your Google Account first.');
       return;
     }
 
-    setDashboardData((prev) => {
-      const updatedTodayAttendance = prev.todayAttendance.map((a, i) => {
-        if ((record.id && a.id === record.id) || (record.index !== undefined && i === record.index)) {
-          return {
-            ...a,
-            plan: updates.plan,
-            status: updates.status,
-            name: updates.name || a.name,
-            phone: updates.phone !== undefined ? updates.phone : a.phone,
-          };
-        }
-        return a;
-      });
-
-      return {
-        ...prev,
-        todayAttendance: updatedTodayAttendance,
-      };
-    });
+    setIsPullingMembers(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
-      await dbUpdateAttendance(currentStore, record, updates);
-    } catch (err) {
-      console.error('Failed to update attendance in cloud:', err);
+      const pulledMembers = await fetchMembersFromGoogleSheets(activeToken, spreadsheet.spreadsheetId);
+      if (pulledMembers.length === 0) {
+        setSuccessMsg('No member rows found in "Members Directory" tab of your Google Sheet.');
+        return;
+      }
+
+      const res = await dbBatchUpsertMembers(currentStore || 'Binti Gym', pulledMembers);
+      setSuccessMsg(`🎉 Successfully pulled from Google Sheets: Added ${res.added} new member(s) and updated ${res.updated} member(s)!`);
+      if (onMembersImported) {
+        onMembersImported(pulledMembers);
+      }
+    } catch (err: any) {
+      console.error('Failed to pull members:', err);
+      setErrorMsg(err.message || 'Failed to pull members from Google Sheet.');
+    } finally {
+      setIsPullingMembers(false);
     }
   };
-
-  const handleEditExpense = async (
-    record: any,
-    updates: { paymentMethod: string; amount: number; category?: string; description?: string }
-  ) => {
-    if (!activeShift) {
-      setShowShiftModal(true);
-      return;
-    }
-
-    setDashboardData((prev) => {
-      const oldAmount = Number(record.amount) || 0;
-      const newAmount = Number(updates.amount) || 0;
-      const amountDiff = newAmount - oldAmount;
-
-      const oldPayment = (record.payment || record.paymentMethod || '').toLowerCase();
-      const newPayment = (updates.paymentMethod || '').toLowerCase();
-
-      let cashOutDiff = 0;
-      if (oldPayment.includes('cash')) cashOutDiff -= oldAmount;
-      if (newPayment.includes('cash')) cashOutDiff += newAmount;
-
-      const updatedTodayExpenses = prev.todayExpenses.map((e, i) => {
-        if ((record.id && e.id === record.id) || (record.index !== undefined && i === record.index)) {
-          return {
-            ...e,
-            payment: updates.paymentMethod,
-            amount: newAmount,
-            category: updates.category || e.category,
-            description: updates.description || e.description,
-          };
-        }
-        return e;
-      });
-
-      return {
-        ...prev,
-        todayExpenses: updatedTodayExpenses,
-        totalExpenses: prev.totalExpenses + amountDiff,
-        netIncome: prev.netIncome - amountDiff,
-        cashOut: Math.max(0, prev.cashOut + cashOutDiff),
-      };
-    });
-
-    try {
-      await dbUpdateExpense(currentStore, record, updates);
-    } catch (err) {
-      console.error('Failed to update expense in cloud:', err);
-    }
-  };
-
-  const handleStartShift = async (shift: StaffShift) => {
-    setActiveShift(shift);
-    saveStoredActiveShift(shift, currentStore);
-    setShowShiftModal(false);
-    try {
-      await dbStartShift(currentStore, shift);
-    } catch (err) {
-      console.warn('Shift sync warning:', err);
-    }
-  };
-
-  const handleEndShift = async () => {
-    setActiveShift(null);
-    saveStoredActiveShift(null, currentStore);
-    setShowShiftModal(false);
-    try {
-      await dbEndShift(currentStore);
-    } catch (err) {
-      console.warn('End shift sync warning:', err);
-    }
-  };
-
-  // Standalone Customer Entrance Check-In Terminal Mode (Clean Kiosk: No staff pop up notifications)
-  if (isCheckinMode) {
-    return (
-      <div className="relative min-h-screen">
-        <EntranceCheckInView
-          onCheckinPhone={handleCheckinPhone}
-          onCheckinId={handleCheckinId}
-          onRecordWalkIn={handleRecordWalkIn}
-          onBackToStaffPOS={() => {
-            setIsCheckinMode(false);
-            if (typeof window !== 'undefined' && window.location.search.includes('checkin')) {
-              window.history.pushState(null, '', window.location.pathname);
-            }
-          }}
-          currentStore={currentBusinessName || currentStore}
-          availableStores={availableStores}
-          currentBusinessPin={currentBusinessPin}
-        />
-      </div>
-    );
-  }
-
-  const isToday = selectedDate === getTodayIsoDate();
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-5 lg:p-8 font-sans pb-28 md:pb-8 relative">
-      {/* Floating Push Notification Banner on Main Terminal */}
-      {activePushBanner && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
-          <div
-            className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-2xl flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md ${
-              activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                ? 'border-rose-500 shadow-rose-950/80'
-                : 'border-emerald-500 shadow-emerald-950/80'
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 animate-pulse ${
-                  activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
-                    : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                }`}
-              >
-                {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked' ? (
-                  <AlertCircle className="w-5 h-5" />
-                ) : (
-                  <Bell className="w-5 h-5" />
-                )}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-xs font-black uppercase tracking-wide ${
-                      activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                        ? 'text-rose-400'
-                        : 'text-emerald-400'
-                    }`}
-                  >
-                    {activePushBanner.title}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {activePushBanner.timestamp}
-                  </span>
-                </div>
-                <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug">
-                  {activePushBanner.message}
-                </p>
-                <span
-                  className={`inline-block text-[10px] font-semibold mt-1 ${
-                    activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                      ? 'text-rose-400'
-                      : 'text-emerald-400'
-                  }`}
-                >
-                  {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                    ? '⚠️ Action Required: Membership Expired'
-                    : '✓ Synced across all terminal screens'}
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+              <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                Google Sheets Real-Time Sync
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                  Google Workspace
                 </span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Sync Daily Summary (Latest on Top), Monthly Financial Summary, Net Baiduri, Net BIBD, sales, check-ins, and expenses directly to Google Sheets.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {user ? (
+          <div className="flex items-center gap-3 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+            {user.photoURL ? (
+              <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-slate-700" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-xs">
+                {user.email?.[0].toUpperCase() || 'G'}
               </div>
+            )}
+            <div className="text-xs">
+              <p className="font-bold text-slate-200">{user.displayName || 'Connected Account'}</p>
+              <p className="text-[11px] text-slate-400 font-mono">{user.email}</p>
             </div>
             <button
-              type="button"
-              onClick={() => setActivePushBanner(null)}
-              className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              onClick={handleSignOut}
+              title="Sign Out"
+              className="ml-2 p-2 hover:bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
             >
-              <X className="w-4 h-4" />
+              <LogOut className="w-4 h-4" />
             </button>
+          </div>
+        ) : (
+          <div>
+            {/* Official Material Google Sign-In Button */}
+            <button
+              onClick={handleSignIn}
+              disabled={isSigningIn}
+              className="flex items-center gap-3 px-4 py-2.5 bg-white text-slate-800 hover:bg-slate-100 font-bold rounded-xl text-xs shadow-md transition-all border border-slate-300 disabled:opacity-50"
+            >
+              <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+              </svg>
+              {isSigningIn ? 'Connecting...' : 'Sign in with Google'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Error & Success Messages */}
+      {errorMsg && (
+        <div className="p-4 bg-rose-950/40 border border-rose-500/50 rounded-xl text-rose-200 text-xs flex items-center gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="p-4 bg-emerald-950/40 border border-emerald-500/50 rounded-xl text-emerald-200 text-xs flex items-center gap-2.5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Main Connection Status Card */}
+      {!user ? (
+        <div className="p-8 bg-slate-900 border border-slate-800 rounded-2xl text-center space-y-4 max-w-xl mx-auto my-6">
+          <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-white">Google Workspace Auth Required</h3>
+          <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+            Connect your Google account to enable automatic cloud backup and live synchronization with Google Sheets. You will be able to view and manage your sales spreadsheets anytime in Google Drive.
+          </p>
+          <button
+            onClick={handleSignIn}
+            disabled={isSigningIn}
+            className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-lg shadow-emerald-950/40 flex items-center gap-2 mx-auto"
+          >
+            <Sparkles className="w-4 h-4" />
+            {isSigningIn ? 'Connecting to Google...' : 'Connect Google Workspace Account'}
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Target info & Quick stats */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Spreadsheet Target Info */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" /> Active Destination Spreadsheet
+                </h3>
+                {spreadsheet && (
+                  <a
+                    href={spreadsheet.spreadsheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Open in Google Sheets
+                  </a>
+                )}
+              </div>
+
+              {isLoadingSpreadsheet ? (
+                <div className="p-6 bg-slate-950 rounded-xl text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" /> Fetching spreadsheet from Google Drive...
+                </div>
+              ) : spreadsheet ? (
+                <div className="bg-slate-950 border border-slate-800/80 p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                    <div>
+                      <p className="text-xs text-slate-400">Spreadsheet Name</p>
+                      <p className="text-sm font-bold text-white mt-0.5">{spreadsheet.title}</p>
+                    </div>
+                    <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold rounded-lg flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Ready
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Synced Tabs (Latest on Top)</span>
+                      <span className="font-semibold text-slate-200">Daily Summary, Monthly Summary, Sales, Check-Ins, Members, Expenses</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[11px]">Last Sync Status</span>
+                      <span className="font-semibold text-emerald-400">
+                        {lastSynced ? `Synced at ${lastSynced}` : 'Never synced'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-xs text-amber-300">
+                  No active spreadsheet found. Click "Sync Current Data" to generate a new spreadsheet in your Google Drive.
+                </div>
+              )}
+
+              {/* Sync & Two-Way Import Controls */}
+              <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleTriggerSync}
+                    disabled={isSyncing || !spreadsheet}
+                    className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                    {isSyncing ? 'Pushing Data to Google Sheets...' : '📤 Push Data to Google Sheets'}
+                  </button>
+
+                  <button
+                    onClick={handlePullMembers}
+                    disabled={isPullingMembers || !spreadsheet}
+                    className="px-5 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-sky-950/40 cursor-pointer"
+                  >
+                    <Users className={`w-4 h-4 ${isPullingMembers ? 'animate-spin' : ''}`} />
+                    {isPullingMembers ? 'Importing from Sheet...' : '📥 Pull / Import Members from Sheet'}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  🔒 Safe & encrypted via Google Workspace OAuth API
+                </p>
+              </div>
+
+              {/* Two-way Member Sync Quick Guide */}
+              <div className="p-3.5 bg-sky-950/30 border border-sky-500/20 rounded-xl space-y-1.5">
+                <p className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-sky-400" />
+                  Two-Way Member Sync Supported!
+                </p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  You can type new members directly into your Google Sheet under the <strong className="text-white">"Members Directory"</strong> tab.
+                  Columns: <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Member ID</code> (optional), <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Full Name</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Phone</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Plan</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">Start Date</code>, <code className="text-sky-300 bg-slate-900 px-1 py-0.5 rounded">End Date</code>.
+                  Then click <strong className="text-sky-400">"📥 Pull / Import Members from Sheet"</strong> to sync them into your app!
+                </p>
+              </div>
+            </div>
+
+            {/* Sync Content Payload Stats */}
+            <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
+                <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload to Sync
+              </h3>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Sales Records
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todaySales.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <Calendar className="w-3.5 h-3.5 text-sky-400" /> Check-In Visits
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todayAttendance.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <Users className="w-3.5 h-3.5 text-purple-400" /> Registered
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.members.length}</p>
+                </div>
+
+                <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
+                  <span className="text-slate-400 flex items-center gap-1 text-[11px]">
+                    <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Expenses
+                  </span>
+                  <p className="text-base font-bold text-white">{dashboardData.todayExpenses.length}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Live Daily Summary Report Preview (Matching User Screenshot Layout) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                <Eye className="w-4 h-4 text-emerald-400" /> Daily Summary Report Format
+              </h3>
+              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-600/30 px-2 py-0.5 rounded">
+                Live Preview
+              </span>
+            </div>
+
+            {/* Google Sheets Style Rendered Table */}
+            <div className="border border-slate-700/80 rounded-xl overflow-hidden text-xs bg-slate-950 shadow-inner font-sans">
+              {/* Header: REPORT FOR ... */}
+              <div className="bg-slate-950 border-b border-slate-800 p-2.5 text-center font-bold text-white tracking-wide text-xs">
+                {summaryMetrics.headerTitle}
+              </div>
+
+              {/* Counts */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>New Membership Sign-ups</span>
+                  <span className="font-semibold text-white">{summaryMetrics.newMembershipCount}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Walk-In Entries</span>
+                  <span className="font-semibold text-white">{summaryMetrics.walkInCount}</span>
+                </div>
+              </div>
+
+              {/* INCOME BANNER */}
+              <div className="bg-emerald-600 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider">
+                --- INCOME (PAYMENT IN) ---
+              </div>
+
+              {/* Income Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Cash In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.cashIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Baiduri In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.baiduriIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Bibd In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.bibdIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Coupon In</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.couponIn)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-emerald-950/60 text-emerald-400 font-bold border-t border-emerald-800/40">
+                  <span>TOTAL INCOME IN</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.totalIncomeIn)}</span>
+                </div>
+              </div>
+
+              {/* EXPENSES BANNER */}
+              <div className="bg-rose-600 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider">
+                --- EXPENSES (PAYMENT OUT) ---
+              </div>
+
+              {/* Expenses Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Cash Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.cashOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Baiduri Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.baiduriOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Bibd Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.bibdOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 text-slate-300">
+                  <span>Coupon Out</span>
+                  <span className="font-mono text-slate-200">{fmtCurrency(summaryMetrics.couponOut)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 bg-rose-950/60 text-rose-400 font-bold border-t border-rose-800/40">
+                  <span>TOTAL EXPENSES OUT</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.totalExpensesOut)}</span>
+                </div>
+              </div>
+
+              {/* SUMMARY BANNER */}
+              <div className="bg-slate-950 px-3 py-1.5 text-center font-bold text-white text-[11px] tracking-wider border-t border-slate-800">
+                --- SUMMARY ---
+              </div>
+
+              {/* Summary Rows */}
+              <div className="divide-y divide-slate-800/60 bg-slate-900/40">
+                <div className="flex justify-between px-3 py-1.5 font-bold text-sky-400">
+                  <span>NET CASH BALANCE (Drawer Cash)</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netCash)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 font-bold text-cyan-400">
+                  <span>NET BAIDURI BALANCE</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netBaiduri)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-1.5 font-bold text-purple-400">
+                  <span>NET BIBD BALANCE</span>
+                  <span className="font-mono">{fmtCurrency(summaryMetrics.netBibd)}</span>
+                </div>
+                <div className="flex justify-between px-3 py-2 font-bold bg-amber-500/20 text-amber-300 border-t border-amber-500/40 shadow-inner">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    NET DAILY BALANCE (All Methods)
+                  </span>
+                  <span className="font-mono text-amber-200">{fmtCurrency(summaryMetrics.netDaily)}</span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-500 text-center">
+              Synced to Google Sheets tab "Daily Summary" with newest reports at row 1.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Main Container */}
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Top Header */}
-        <Header
-          viewDate={selectedDate}
-          isToday={selectedDate === getTodayIsoDate()}
-          isCheckinMode={isCheckinMode}
-          activeShift={activeShift}
-          notifications={notifications}
-          currentStore={currentBusinessName || currentStore}
-          syncStatus={syncStatus}
-          isSoundEnabled={isSoundEnabled}
-          onToggleSound={toggleSound}
-          onOpenShiftModal={() => setShowShiftModal(true)}
-          onLockTerminal={handleLogout}
-          onToggleCheckinMode={() => setIsCheckinMode(true)}
-          onRefresh={() => {
-            setIsRefreshing(true);
-            setTimeout(() => setIsRefreshing(false), 500);
-          }}
-          onClearNotifications={handleClearNotifications}
-          onClearNotificationItem={handleClearNotificationItem}
-          onTestNotification={handleTestNotification}
-        />
-
-        {/* Global Toolbar & Date Navigation */}
-        <Toolbar
-          selectedDate={selectedDate}
-          onDateChange={handleDateChange}
-          onResetToday={handleResetToday}
-          onResetDatabase={handleResetDatabase}
-          isRefreshing={isRefreshing}
-          onRefresh={() => {
-            setIsRefreshing(true);
-            setTimeout(() => setIsRefreshing(false), 500);
-          }}
-        />
-
-        {/* Terminal Blocked Alert Banner if no active staff shift */}
-        {!activeShift && (
-          <div className="bg-rose-950/40 border border-rose-500/50 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 text-rose-200 backdrop-blur-sm shadow-xl shadow-rose-950/30">
-            <div className="flex items-center gap-3.5">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 animate-pulse">
-                <Lock className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-sm font-black text-rose-100 flex items-center gap-2">
-                  Terminal Blocked: No Staff On Duty
-                </p>
-                <p className="text-xs text-rose-300/80 mt-0.5">
-                  All terminal operations, transaction logs, check-ins, and POS sales are blocked until an authorized staff starts duty.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowShiftModal(true)}
-                className="w-full sm:w-auto px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/50 transition cursor-pointer"
-              >
-                <UserCheck className="w-3.5 h-3.5" /> Start Staff Shift
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Operational Statistics Grid */}
-        <StatsGrid
-          data={dashboardData}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        />
-
-        {/* Navigation Tabs Bar (Positioned between Gross Sales & Payment Method Summary) */}
-        <NavigationTabs
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          activeShift={activeShift}
-          onOpenShiftModal={() => setShowShiftModal(true)}
-          onToggleCheckinMode={() => setIsCheckinMode(true)}
-        />
-
-        {/* Active Tab View Content / Locked Screen */}
-        {!activeShift ? (
-          <div className="bg-slate-900/95 border-2 border-rose-500/30 p-8 sm:p-12 rounded-3xl shadow-2xl text-center flex flex-col items-center justify-center space-y-5">
-            <div className="w-16 h-16 rounded-3xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-inner">
-              <Lock className="w-8 h-8" />
-            </div>
-            <div className="max-w-md space-y-2">
-              <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Terminal Locked — Staff On Duty Required
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-                All daily operations, POS checkout, dance/fitness classes, PT sessions, walk-in passes, member registrations, and ledgers are locked until a staff member clocks in.
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowShiftModal(true)}
-                className="w-full sm:w-auto px-6 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-950/50 transition-all cursor-pointer"
-              >
-                <UserCheck className="w-4 h-4" /> Start Staff Duty Shift
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsCheckinMode(true)}
-                className="w-full sm:w-auto px-5 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 border border-slate-700 transition cursor-pointer"
-              >
-                <Monitor className="w-4 h-4 text-emerald-400" /> Customer Entrance Kiosk
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-slate-900/90 border border-slate-800 p-4 sm:p-6 rounded-2xl shadow-xl">
-            {activeTab === 'sales' && (
-              <SalesTab
-                data={dashboardData}
-                onDeleteSale={handleDeleteSale}
-                onDeleteAttendance={handleDeleteAttendance}
-                onDeleteExpense={handleDeleteExpense}
-                onEditSale={handleEditSale}
-                onEditAttendance={handleEditAttendance}
-                onEditExpense={handleEditExpense}
-              />
-            )}
-
-            {activeTab === 'staffcheckin' && (
-              <PhoneCheckinTab
-                onCheckinPhone={handleCheckinPhone}
-                onCheckinId={handleCheckinId}
-              />
-            )}
-
-            {activeTab === 'pos' && <PosTab onRecordPOS={handleRecordPOS} />}
-
-            {activeTab === 'classes' && <ClassesTab onRecordClass={handleRecordClass} />}
-
-            {activeTab === 'pt' && (
-              <PersonalTrainerTab
-                onRecordPTIn={handleRecordPTIn}
-                onRecordPTOut={handleRecordPTOut}
-              />
-            )}
-
-            {activeTab === 'walkin' && <WalkInTab onRecordWalkIn={handleRecordWalkIn} />}
-
-            {activeTab === 'membership' && (
-              <MemberRegistrationTab
-                data={dashboardData}
-                onRegisterMember={handleRegisterMember}
-                onOpenRenewModal={(m) => setRenewMember(m)}
-                onDeleteMember={handleDeleteMember}
-              />
-            )}
-
-            {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
-
-            {activeTab === 'qrposter' && <QrPosterTab />}
-
-            {activeTab === 'sheets' && <GoogleSheetsTab dashboardData={dashboardData} />}
-          </div>
-        )}
-      </div>
-
-      {/* Quick Renew Modal */}
-      <QuickRenewModal
-        member={renewMember}
-        onClose={() => setRenewMember(null)}
-        onConfirmRenew={handleConfirmRenew}
-      />
-
-      {/* Staff Shift Management Modal */}
-      <StaffShiftModal
-        isOpen={showShiftModal}
-        activeShift={activeShift}
-        dashboardData={dashboardData}
-        currentStore={currentStore}
-        onStartShift={handleStartShift}
-        onEndShift={handleEndShift}
-        onClose={() => setShowShiftModal(false)}
-      />
-
-      {/* Delete Confirmation Modal */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      {/* Confirmation Modal prior to data mutation */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                <Trash2 className="w-5 h-5" />
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">
+                <FileSpreadsheet className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-100">{deleteTarget.title}</h3>
-                <p className="text-xs text-slate-400">Confirm Deletion</p>
+                <h3 className="text-base font-bold text-white">Confirm Google Sheets Sync</h3>
+                <p className="text-xs text-slate-400">Google Drive & Sheets Integration</p>
               </div>
             </div>
 
-            <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-              {deleteTarget.subtitle}
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+              Are you sure you want to sync the formatted <strong>Daily Summary</strong> and <strong>Monthly Financial Summary</strong> (with Net Baiduri & Net BIBD, latest on top), along with sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses to your Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors"
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors"
               >
                 Cancel
               </button>
               <button
-                type="button"
-                onClick={executeDelete}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-lg shadow-rose-950/50"
+                onClick={executeSync}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-950/40"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                Delete Permanently
+                <CheckCircle2 className="w-4 h-4" /> Confirm & Sync Now
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Store Registration / Multi-Device Business Login Modal */}
-      <BusinessAuthModal
-        isOpen={showBusinessAuthModal}
-        currentBusinessName={currentBusinessName}
-        canClose={!!currentBusinessName && !!currentBusinessPin}
-        onClose={() => setShowBusinessAuthModal(false)}
-        onAuthenticated={handleBusinessAuthenticated}
-      />
     </div>
   );
-}
+};

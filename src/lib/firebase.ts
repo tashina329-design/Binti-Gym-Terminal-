@@ -1,19 +1,18 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
-import configFile from '../../firebase-applet-config.json';
 
 // Support both static configuration and Vercel/Vite environment variables
 const env = typeof import.meta !== 'undefined' && (import.meta as any).env ? (import.meta as any).env : ({} as any);
 
 export const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || configFile?.apiKey || 'AIzaSyBZSZqX6mDucE2pAeSATjxoPF3Lrw1K0iE',
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || configFile?.authDomain || 'gen-lang-client-0329117938.firebaseapp.com',
-  projectId: env.VITE_FIREBASE_PROJECT_ID || configFile?.projectId || 'gen-lang-client-0329117938',
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || configFile?.storageBucket || 'gen-lang-client-0329117938.firebasestorage.app',
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || configFile?.messagingSenderId || '368231596957',
-  appId: env.VITE_FIREBASE_APP_ID || configFile?.appId || '1:368231596957:web:22393ebc9b7ffb85a1e574',
-  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || (configFile as any)?.firestoreDatabaseId || 'ai-studio-remixremixstaffp-b8f5b69f-e55f-4e3e-ba5c-babddac50c2d',
+  apiKey: env.VITE_FIREBASE_API_KEY || 'AIzaSyBZSZqX6mDucE2pAeSATjxoPF3Lrw1K0iE',
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0329117938.firebaseapp.com',
+  projectId: env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0329117938',
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'gen-lang-client-0329117938.firebasestorage.app',
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '368231596957',
+  appId: env.VITE_FIREBASE_APP_ID || '1:368231596957:web:22393ebc9b7ffb85a1e574',
+  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || 'ai-studio-remixremixstaffp-b8f5b69f-e55f-4e3e-ba5c-babddac50c2d',
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);

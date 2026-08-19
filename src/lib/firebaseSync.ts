@@ -1461,6 +1461,70 @@ export async function dbRegisterMember(
   }).catch((e) => console.warn('Broadcast notice:', e));
 }
 
+export async function dbBatchUpsertMembers(
+  businessName: string,
+  membersToSave: Member[]
+): Promise<{ added: number; updated: number }> {
+  await ensureFirebaseAuth();
+  const membersColl = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersColl);
+  const existingDocs = snap.docs.map((d) => ({ ...d.data(), id: d.id } as any));
+
+  let added = 0;
+  let updated = 0;
+  const deviceId = getDeviceId();
+
+  for (const m of membersToSave) {
+    if (!m.name || !m.name.trim()) continue;
+
+    // Check by memberId, or by matching phone, or matching name
+    const existing = existingDocs.find(
+      (e) =>
+        (m.memberId && e.memberId && e.memberId === m.memberId) ||
+        (m.phone && e.phone && e.phone === m.phone) ||
+        (e.name && e.name.toLowerCase().trim() === m.name.toLowerCase().trim())
+    );
+
+    const memberId = m.memberId || existing?.memberId || 'MEM-' + Math.floor(100000 + Math.random() * 900000);
+    const docId = existing?.id || existing?.memberId || memberId;
+    const status = m.status || getMemberStatus(m.endDate || '');
+
+    await setDoc(
+      doc(membersColl, docId),
+      {
+        memberId,
+        name: m.name.trim(),
+        phone: m.phone ? m.phone.trim() : '',
+        plan: m.plan || 'Monthly Pass',
+        startDate: m.startDate || getBruneiTodayIsoDate(),
+        endDate: m.endDate || '',
+        status,
+        price: Number((m as any).price) || 0,
+        deviceId,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    if (existing) {
+      updated++;
+    } else {
+      added++;
+    }
+  }
+
+  if (added > 0 || updated > 0) {
+    dbBroadcastEvent(businessName, {
+      type: 'membership',
+      title: '📥 Google Sheets Sync',
+      message: `Pulled from Google Sheets: ${added} new and ${updated} updated member profiles.`,
+      timestamp: getBruneiFormattedTime(new Date(), true),
+    }).catch((e) => console.warn('Broadcast error:', e));
+  }
+
+  return { added, updated };
+}
+
 export async function dbRenewMember(
   businessName: string,
   data: {

@@ -26,6 +26,18 @@ export interface DailySummaryMetrics {
   netBibd: number;
 }
 
+export interface FinancialPeriodMetrics {
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+  cashIn: number;
+  baiduriIn: number;
+  bibdIn: number;
+  cashOut: number;
+  baiduriOut: number;
+  bibdOut: number;
+}
+
 const SPREADSHEET_TITLE = 'IronVault Gym - Management & Sales Log';
 
 /**
@@ -170,6 +182,133 @@ export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryM
 }
 
 /**
+ * Computes financial metrics for any array of sales and expenses.
+ */
+function computePeriodFinancialMetrics(sales: any[], expenses: any[]): FinancialPeriodMetrics {
+  let cashIn = 0;
+  let baiduriIn = 0;
+  let bibdIn = 0;
+
+  for (const s of sales) {
+    if (/pt payout|pt out/i.test(s.category)) continue;
+    const amt = Number(s.amount) || 0;
+    const pay = (s.payment || s.paymentMethod || '').toLowerCase();
+
+    if (pay.includes('cash')) {
+      cashIn += amt;
+    } else if (pay.includes('baiduri') || pay.includes('card')) {
+      baiduriIn += amt;
+    } else if (pay.includes('bibd') || pay.includes('online')) {
+      bibdIn += amt;
+    } else {
+      cashIn += amt;
+    }
+  }
+
+  const totalRevenue = cashIn + baiduriIn + bibdIn;
+
+  let cashOut = 0;
+  let baiduriOut = 0;
+  let bibdOut = 0;
+
+  for (const e of expenses) {
+    const amt = Number(e.amount) || 0;
+    const pay = (e.payment || e.paymentMethod || '').toLowerCase();
+
+    if (pay.includes('cash')) {
+      cashOut += amt;
+    } else if (pay.includes('baiduri') || pay.includes('card')) {
+      baiduriOut += amt;
+    } else if (pay.includes('bibd') || pay.includes('online')) {
+      bibdOut += amt;
+    } else {
+      cashOut += amt;
+    }
+  }
+
+  // Include PT Out sales as payouts
+  for (const s of sales) {
+    if (/pt payout|pt out/i.test(s.category)) {
+      const amt = Number(s.amount) || 0;
+      const pay = (s.payment || s.paymentMethod || '').toLowerCase();
+
+      if (pay.includes('baiduri') || pay.includes('card')) {
+        baiduriOut += amt;
+      } else if (pay.includes('bibd') || pay.includes('online')) {
+        bibdOut += amt;
+      } else {
+        cashOut += amt;
+      }
+    }
+  }
+
+  const totalExpenses = cashOut + baiduriOut + bibdOut;
+  const netProfit = totalRevenue - totalExpenses;
+
+  return {
+    totalRevenue,
+    totalExpenses,
+    netProfit,
+    cashIn,
+    baiduriIn,
+    bibdIn,
+    cashOut,
+    baiduriOut,
+    bibdOut,
+  };
+}
+
+/**
+ * Calculates Monthly & Overall Financial Summary metrics matching the requested table.
+ */
+export function calculateFinancialSummaryTable(data: DashboardData): Array<Array<string | number>> {
+  const fmt = (num: number) => `$${(Number(num) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const allSales = data.store?.sales && data.store.sales.length > 0 ? data.store.sales : data.todaySales;
+  const allExpenses = data.store?.expenses && data.store.expenses.length > 0 ? data.store.expenses : data.todayExpenses;
+
+  // 1. Today metrics
+  const todayMetrics = computePeriodFinancialMetrics(data.todaySales, data.todayExpenses);
+
+  // 2. Month metrics
+  const targetYearMonth = (data.viewDate || new Date().toISOString().split('T')[0]).substring(0, 7); // e.g. "2026-08"
+  const isThisMonth = (ts?: string) => {
+    if (!ts) return false;
+    return ts.startsWith(targetYearMonth);
+  };
+
+  const monthSales = allSales.filter((s: any) => isThisMonth(s.timestamp || s.createdAt || s.time));
+  const monthExpenses = allExpenses.filter((e: any) => isThisMonth(e.timestamp || e.createdAt || e.time));
+  const monthMetrics = computePeriodFinancialMetrics(
+    monthSales.length > 0 ? monthSales : data.todaySales,
+    monthExpenses.length > 0 ? monthExpenses : data.todayExpenses
+  );
+
+  // 3. Overall (All-Time) metrics
+  const overallMetrics = computePeriodFinancialMetrics(allSales, allExpenses);
+
+  // Get month label (e.g. "This Month (Aug 2026)")
+  const dateObj = new Date(data.viewDate || Date.now());
+  const monthName = dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+  return [
+    ['🏋️ GYM FINANCIAL SUMMARY', '', '', ''],
+    ['Financial Metric', 'Today', `This Month (${monthName})`, 'Overall (All-Time)'],
+    ['Total Revenue (Income)', fmt(todayMetrics.totalRevenue), fmt(monthMetrics.totalRevenue), fmt(overallMetrics.totalRevenue)],
+    ['Total Expenses', fmt(todayMetrics.totalExpenses), fmt(monthMetrics.totalExpenses), fmt(overallMetrics.totalExpenses)],
+    ['Net Profit / Balance', fmt(todayMetrics.netProfit), fmt(monthMetrics.netProfit), fmt(overallMetrics.netProfit)],
+    ['INCOME BY PAYMENT METHOD', '', '', ''],
+    ['Cash In', fmt(todayMetrics.cashIn), fmt(monthMetrics.cashIn), fmt(overallMetrics.cashIn)],
+    ['Baiduri In', fmt(todayMetrics.baiduriIn), fmt(monthMetrics.baiduriIn), fmt(overallMetrics.baiduriIn)],
+    ['BIBD In', fmt(todayMetrics.bibdIn), fmt(monthMetrics.bibdIn), fmt(overallMetrics.bibdIn)],
+    ['EXPENSES BY PAYMENT METHOD', '', '', ''],
+    ['Cash Out', fmt(todayMetrics.cashOut), fmt(monthMetrics.cashOut), fmt(overallMetrics.cashOut)],
+    ['Baiduri Out', fmt(todayMetrics.baiduriOut), fmt(monthMetrics.baiduriOut), fmt(overallMetrics.baiduriOut)],
+    ['BIBD Out', fmt(todayMetrics.bibdOut), fmt(monthMetrics.bibdOut), fmt(overallMetrics.bibdOut)],
+  ];
+}
+
+/**
  * Formats daily summary block into 2D string array for Google Sheets rows.
  */
 export function buildDailySummaryRows(metrics: DailySummaryMetrics): Array<[string, string | number]> {
@@ -228,12 +367,13 @@ export async function findOrCreateGymSpreadsheet(accessToken: string): Promise<S
     };
   }
 
-  // 2. Create new spreadsheet with Daily Summary tab first
+  // 2. Create new spreadsheet with Daily Summary & Monthly Summary tabs
   const createUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
   const body = {
     properties: { title: SPREADSHEET_TITLE },
     sheets: [
       { properties: { title: 'Daily Summary' } },
+      { properties: { title: 'Monthly Summary' } },
       { properties: { title: 'Sales Log' } },
       { properties: { title: 'Check-In Log' } },
       { properties: { title: 'Members Directory' } },
@@ -261,6 +401,54 @@ export async function findOrCreateGymSpreadsheet(accessToken: string): Promise<S
     spreadsheetUrl: newSheet.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${newSheet.spreadsheetId}`,
     title: SPREADSHEET_TITLE,
   };
+}
+
+/**
+ * Ensures 'Monthly Summary' sheet exists in the target spreadsheet.
+ */
+async function ensureMonthlySummarySheetExists(accessToken: string, spreadsheetId: string): Promise<number | null> {
+  try {
+    const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
+    const metaRes = await fetch(metaUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!metaRes.ok) return null;
+    const metaData = await metaRes.json();
+    const existing = metaData.sheets?.find((s: any) => s.properties?.title === 'Monthly Summary');
+    if (existing) {
+      return existing.properties.sheetId;
+    }
+
+    // Add 'Monthly Summary' sheet if missing
+    const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: 'Monthly Summary',
+                index: 1,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    if (addRes.ok) {
+      const resJson = await addRes.json();
+      return resJson.replies?.[0]?.addSheet?.properties?.sheetId || null;
+    }
+  } catch (err) {
+    console.warn('Error ensuring Monthly Summary sheet:', err);
+  }
+  return null;
 }
 
 /**
@@ -342,6 +530,9 @@ export async function syncDataToGoogleSheets(
   spreadsheetId: string,
   data: DashboardData
 ): Promise<void> {
+  // Ensure Monthly Summary tab exists in the destination spreadsheet
+  const monthlySheetId = await ensureMonthlySummarySheetExists(accessToken, spreadsheetId);
+
   const summaryMetrics = calculateDailySummaryMetrics(data);
   const todaySummaryRows = buildDailySummaryRows(summaryMetrics);
 
@@ -353,14 +544,22 @@ export async function syncDataToGoogleSheets(
     summaryMetrics.headerTitle
   );
 
-  // 2. Prepare batch update value ranges
+  // 2. Generate Monthly & Overall Financial Summary rows
+  const monthlySummaryRows = calculateFinancialSummaryTable(data);
+
+  // 3. Prepare batch update value ranges
   const valueRanges = [
     // 1. Daily Summary (Latest on top)
     {
       range: "'Daily Summary'!A1:B1000",
       values: mergedSummaryRows,
     },
-    // 2. Sales Log (Reverse chronological - latest on top)
+    // 2. Monthly Financial Summary
+    {
+      range: "'Monthly Summary'!A1:D50",
+      values: monthlySummaryRows,
+    },
+    // 3. Sales Log (Reverse chronological - latest on top)
     {
       range: "'Sales Log'!A1:F500",
       values: [
@@ -375,7 +574,7 @@ export async function syncDataToGoogleSheets(
         ]),
       ],
     },
-    // 3. Check-In Log (Reverse chronological - latest on top)
+    // 4. Check-In Log (Reverse chronological - latest on top)
     {
       range: "'Check-In Log'!A1:F500",
       values: [
@@ -389,7 +588,7 @@ export async function syncDataToGoogleSheets(
         ]),
       ],
     },
-    // 4. Members Directory
+    // 5. Members Directory
     {
       range: "'Members Directory'!A1:G500",
       values: [
@@ -405,7 +604,7 @@ export async function syncDataToGoogleSheets(
         ]),
       ],
     },
-    // 5. Expenses Log (Reverse chronological - latest on top)
+    // 6. Expenses Log (Reverse chronological - latest on top)
     {
       range: "'Expenses Log'!A1:F500",
       values: [
@@ -442,19 +641,21 @@ export async function syncDataToGoogleSheets(
     throw new Error(err.error?.message || 'Failed to update Google Sheets data');
   }
 
-  // 3. Apply rich visual styling matching the screenshot
+  // 4. Apply rich visual styling to Daily Summary and Monthly Summary
   try {
     await applyDailySummaryFormatting(accessToken, spreadsheetId);
+    if (monthlySheetId !== null) {
+      await applyMonthlySummaryFormatting(accessToken, spreadsheetId, monthlySheetId);
+    }
   } catch (styleErr) {
     console.warn('Optional Google Sheets visual styling notice:', styleErr);
   }
 }
 
 /**
- * Applies visual colors, bold headers, and column widths to the 'Daily Summary' sheet.
+ * Applies visual styling to 'Daily Summary' sheet.
  */
 async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: string): Promise<void> {
-  // Fetch sheet metadata to find sheetId of 'Daily Summary'
   const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(sheetId,title))`;
   const metaRes = await fetch(metaUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -467,75 +668,44 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
 
   const sheetId = summarySheet.properties.sheetId;
 
-  // Formatting requests
   const requests: any[] = [
-    // Column widths: Column A = 270px, Column B = 140px
+    // Column widths
     {
       updateDimensionProperties: {
-        range: {
-          sheetId,
-          dimension: 'COLUMNS',
-          startIndex: 0,
-          endIndex: 1,
-        },
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
         properties: { pixelSize: 270 },
         fields: 'pixelSize',
       },
     },
     {
       updateDimensionProperties: {
-        range: {
-          sheetId,
-          dimension: 'COLUMNS',
-          startIndex: 1,
-          endIndex: 2,
-        },
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 },
         properties: { pixelSize: 140 },
         fields: 'pixelSize',
       },
     },
-    // Row 1: Header Banner (REPORT FOR ...) - Dark Navy #0F172A, White bold text
+    // Row 1: Header Banner (REPORT FOR ...) - Dark Navy #0F172A
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 0,
-          endRowIndex: 1,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 15 / 255, green: 23 / 255, blue: 42 / 255 },
-            textFormat: {
-              foregroundColor: { red: 1, green: 1, blue: 1 },
-              bold: true,
-              fontSize: 11,
-            },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 11 },
             horizontalAlignment: 'CENTER',
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
       },
     },
-    // Row 4: --- INCOME (PAYMENT IN) --- Green Banner #16A34A, White bold text
+    // Row 4: --- INCOME (PAYMENT IN) --- Green Banner #16A34A
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 3,
-          endRowIndex: 4,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 3, endRowIndex: 4, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 22 / 255, green: 163 / 255, blue: 74 / 255 },
-            textFormat: {
-              foregroundColor: { red: 1, green: 1, blue: 1 },
-              bold: true,
-              fontSize: 10,
-            },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
             horizontalAlignment: 'CENTER',
           },
         },
@@ -545,43 +715,24 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
     // Row 9: TOTAL INCOME IN - Light green background #DCFCE7, Dark green bold text #15803D
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 8,
-          endRowIndex: 9,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 8, endRowIndex: 9, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 220 / 255, green: 252 / 255, blue: 231 / 255 },
-            textFormat: {
-              foregroundColor: { red: 21 / 255, green: 128 / 255, blue: 61 / 255 },
-              bold: true,
-            },
+            textFormat: { foregroundColor: { red: 21 / 255, green: 128 / 255, blue: 61 / 255 }, bold: true },
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat)',
       },
     },
-    // Row 10: --- EXPENSES (PAYMENT OUT) --- Red Banner #DC2626, White bold text
+    // Row 10: --- EXPENSES (PAYMENT OUT) --- Red Banner #DC2626
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 9,
-          endRowIndex: 10,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 220 / 255, green: 38 / 255, blue: 38 / 255 },
-            textFormat: {
-              foregroundColor: { red: 1, green: 1, blue: 1 },
-              bold: true,
-              fontSize: 10,
-            },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
             horizontalAlignment: 'CENTER',
           },
         },
@@ -591,132 +742,28 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
     // Row 15: TOTAL EXPENSES OUT - Light red background #FFE4E6, Dark red bold text #B91C1C
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 14,
-          endRowIndex: 15,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 14, endRowIndex: 15, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 255 / 255, green: 228 / 255, blue: 230 / 255 },
-            textFormat: {
-              foregroundColor: { red: 185 / 255, green: 28 / 255, blue: 28 / 255 },
-              bold: true,
-            },
+            textFormat: { foregroundColor: { red: 185 / 255, green: 28 / 255, blue: 28 / 255 }, bold: true },
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat)',
       },
     },
-    // Row 16: --- SUMMARY --- Dark Navy Banner #0F172A, White bold text
+    // Row 16: --- SUMMARY --- Dark Navy Banner #0F172A
     {
       repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 15,
-          endRowIndex: 16,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
+        range: { sheetId, startRowIndex: 15, endRowIndex: 16, startColumnIndex: 0, endColumnIndex: 2 },
         cell: {
           userEnteredFormat: {
             backgroundColor: { red: 15 / 255, green: 23 / 255, blue: 42 / 255 },
-            textFormat: {
-              foregroundColor: { red: 1, green: 1, blue: 1 },
-              bold: true,
-              fontSize: 10,
-            },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
             horizontalAlignment: 'CENTER',
           },
         },
         fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
-      },
-    },
-    // Row 17: NET CASH BALANCE (Drawer Cash) - Blue bold text #2563EB
-    {
-      repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 16,
-          endRowIndex: 17,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
-        cell: {
-          userEnteredFormat: {
-            textFormat: {
-              foregroundColor: { red: 37 / 255, green: 99 / 255, blue: 235 / 255 },
-              bold: true,
-            },
-          },
-        },
-        fields: 'userEnteredFormat(textFormat)',
-      },
-    },
-    // Row 18: NET DAILY BALANCE (All Methods) - Soft yellow tint #FEF3C7, Dark amber bold text #B45309
-    {
-      repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 17,
-          endRowIndex: 18,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
-        cell: {
-          userEnteredFormat: {
-            backgroundColor: { red: 254 / 255, green: 243 / 255, blue: 199 / 255 },
-            textFormat: {
-              foregroundColor: { red: 180 / 255, green: 83 / 255, blue: 9 / 255 },
-              bold: true,
-            },
-          },
-        },
-        fields: 'userEnteredFormat(backgroundColor,textFormat)',
-      },
-    },
-    // Row 19: NET BAIDURI BALANCE - Blue/Cyan bold text #0284C7
-    {
-      repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 18,
-          endRowIndex: 19,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
-        cell: {
-          userEnteredFormat: {
-            textFormat: {
-              foregroundColor: { red: 2 / 255, green: 132 / 255, blue: 199 / 255 },
-              bold: true,
-            },
-          },
-        },
-        fields: 'userEnteredFormat(textFormat)',
-      },
-    },
-    // Row 20: NET BIBD BALANCE - Purple bold text #7E22CE
-    {
-      repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: 19,
-          endRowIndex: 20,
-          startColumnIndex: 0,
-          endColumnIndex: 2,
-        },
-        cell: {
-          userEnteredFormat: {
-            textFormat: {
-              foregroundColor: { red: 126 / 255, green: 34 / 255, blue: 206 / 255 },
-              bold: true,
-            },
-          },
-        },
-        fields: 'userEnteredFormat(textFormat)',
       },
     },
   ];
@@ -724,10 +771,110 @@ async function applyDailySummaryFormatting(accessToken: string, spreadsheetId: s
   const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
   await fetch(batchUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests }),
+  });
+}
+
+/**
+ * Applies visual styling to 'Monthly Summary' sheet matching the user's uploaded image.
+ */
+async function applyMonthlySummaryFormatting(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetId: number
+): Promise<void> {
+  const requests: any[] = [
+    // Column widths: Col A = 260px, Col B = 130px, Col C = 160px, Col D = 160px
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+        properties: { pixelSize: 260 },
+        fields: 'pixelSize',
+      },
     },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 },
+        properties: { pixelSize: 130 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 },
+        properties: { pixelSize: 160 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 },
+        properties: { pixelSize: 160 },
+        fields: 'pixelSize',
+      },
+    },
+    // Row 1: Header Banner (🏋️ GYM FINANCIAL SUMMARY) - Dark Navy #0F172A, Bold white text
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 15 / 255, green: 23 / 255, blue: 42 / 255 },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 12 },
+            horizontalAlignment: 'CENTER',
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+    // Row 2: Table Column Headers - Dark Slate #1E293B, Bold white text
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 4 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 30 / 255, green: 41 / 255, blue: 59 / 255 },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat)',
+      },
+    },
+    // Row 6: INCOME BY PAYMENT METHOD - Green Banner #16A34A, White bold text
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 5, endRowIndex: 6, startColumnIndex: 0, endColumnIndex: 4 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 22 / 255, green: 163 / 255, blue: 74 / 255 },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
+            horizontalAlignment: 'CENTER',
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+    // Row 10: EXPENSES BY PAYMENT METHOD - Red Banner #DC2626, White bold text
+    {
+      repeatCell: {
+        range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 0, endColumnIndex: 4 },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 220 / 255, green: 38 / 255, blue: 38 / 255 },
+            textFormat: { foregroundColor: { red: 1, green: 1, blue: 1 }, bold: true, fontSize: 10 },
+            horizontalAlignment: 'CENTER',
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)',
+      },
+    },
+  ];
+
+  const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`;
+  await fetch(batchUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ requests }),
   });
 }

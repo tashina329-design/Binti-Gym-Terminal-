@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Zap, Trash2, CheckCircle2 } from 'lucide-react';
+import { Search, UserPlus, Zap, Trash2, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { DashboardData, Member } from '../../types';
 
 interface MemberRegistrationTabProps {
@@ -254,11 +254,17 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
 
       {/* Members Directory Table */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-semibold text-slate-200">Registered Members List</h3>
-          <span className="text-xs font-mono text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded-full border border-emerald-700/50 font-bold">
-            Total Registered: {data.members ? data.members.length : 0}
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-slate-200">Registered Members List</h3>
+            <span className="text-xs font-mono text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-700/50 font-bold">
+              {data.members ? data.members.length : 0} members
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Adding via Google Sheet? Go to <strong className="text-slate-200">Google Sheets tab</strong> & click <strong className="text-sky-400">"📥 Pull / Import Members"</strong> to sync.</span>
+          </p>
         </div>
         <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">

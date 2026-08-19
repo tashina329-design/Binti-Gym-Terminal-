@@ -338,39 +338,43 @@ export function buildDailySummaryRows(metrics: DailySummaryMetrics): Array<[stri
   ];
 }
 
-/**
- * Searches Google Drive for existing spreadsheet or creates a new one.
- */
-export async function findOrCreateGymSpreadsheet(accessToken: string): Promise<SpreadsheetInfo> {
-  // 1. Search in Drive
-  const query = encodeURIComponent(
-    `name='${SPREADSHEET_TITLE}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`
-  );
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)`;
+export function getStoreSpreadsheetTitle(storeName?: string): string {
+  const name = (storeName || 'Binti Gym').trim();
+  return `${name} - Management & Sales Log`;
+}
 
-  const searchRes = await fetch(searchUrl, {
+export function extractSpreadsheetIdFromInput(input: string): string {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return trimmed;
+}
+
+export async function verifyAndGetSpreadsheetInfo(accessToken: string, spreadsheetId: string): Promise<SpreadsheetInfo> {
+  const cleanId = extractSpreadsheetIdFromInput(spreadsheetId);
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${cleanId}?fields=properties(title)`;
+  const metaRes = await fetch(metaUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-
-  if (!searchRes.ok) {
-    const err = await searchRes.json();
-    throw new Error(err.error?.message || 'Failed to search Google Drive');
+  if (!metaRes.ok) {
+    const err = await metaRes.json().catch(() => ({}));
+    throw new Error(err.error?.message || 'Invalid or inaccessible Google Spreadsheet ID / URL');
   }
+  const metaData = await metaRes.json();
+  return {
+    spreadsheetId: cleanId,
+    spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${cleanId}`,
+    title: metaData.properties?.title || 'Connected Gym Spreadsheet',
+  };
+}
 
-  const searchData = await searchRes.json();
-  if (searchData.files && searchData.files.length > 0) {
-    const file = searchData.files[0];
-    return {
-      spreadsheetId: file.id,
-      spreadsheetUrl: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}`,
-      title: file.name,
-    };
-  }
-
-  // 2. Create new spreadsheet with Daily Summary & Monthly Summary tabs
+export async function createNewStoreSpreadsheet(accessToken: string, storeName?: string): Promise<SpreadsheetInfo> {
+  const title = getStoreSpreadsheetTitle(storeName);
   const createUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
   const body = {
-    properties: { title: SPREADSHEET_TITLE },
+    properties: { title },
     sheets: [
       { properties: { title: 'Daily Summary' } },
       { properties: { title: 'Monthly Summary' } },
@@ -399,8 +403,57 @@ export async function findOrCreateGymSpreadsheet(accessToken: string): Promise<S
   return {
     spreadsheetId: newSheet.spreadsheetId,
     spreadsheetUrl: newSheet.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${newSheet.spreadsheetId}`,
-    title: SPREADSHEET_TITLE,
+    title,
   };
+}
+
+/**
+ * Searches Google Drive for store's existing spreadsheet or creates a new one.
+ */
+export async function findOrCreateGymSpreadsheet(
+  accessToken: string,
+  storeName?: string,
+  customSpreadsheetId?: string
+): Promise<SpreadsheetInfo> {
+  // If custom ID or stored ID is provided, verify first
+  if (customSpreadsheetId && customSpreadsheetId.trim()) {
+    try {
+      const cleanId = extractSpreadsheetIdFromInput(customSpreadsheetId);
+      return await verifyAndGetSpreadsheetInfo(accessToken, cleanId);
+    } catch (err) {
+      console.warn('Custom spreadsheet not accessible, falling back to store title search:', err);
+    }
+  }
+
+  const title = getStoreSpreadsheetTitle(storeName);
+
+  // 1. Search in Drive specifically for this store's spreadsheet title
+  const query = encodeURIComponent(
+    `name='${title}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`
+  );
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)`;
+
+  const searchRes = await fetch(searchUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!searchRes.ok) {
+    const err = await searchRes.json();
+    throw new Error(err.error?.message || 'Failed to search Google Drive');
+  }
+
+  const searchData = await searchRes.json();
+  if (searchData.files && searchData.files.length > 0) {
+    const file = searchData.files[0];
+    return {
+      spreadsheetId: file.id,
+      spreadsheetUrl: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}`,
+      title: file.name,
+    };
+  }
+
+  // 2. Create new spreadsheet with Daily Summary & Monthly Summary tabs specifically for this store
+  return await createNewStoreSpreadsheet(accessToken, storeName);
 }
 
 /**

@@ -588,6 +588,7 @@ export function App() {
       timestamp,
       category: 'Walk-In',
       customer: data.name ? `${data.name} (Walk-in)` : 'Walk-In Guest',
+      phone: data.phone || '',
       paymentMethod: data.paymentMethod || 'Cash',
       amount: Number(data.amount) || 0,
       staff: activeShift?.staffName || 'Duty Staff',
@@ -955,7 +956,7 @@ export function App() {
   // Edit Handlers with Optimistic Updates & Firestore Sync
   const handleEditSale = async (
     record: any,
-    updates: { paymentMethod: string; amount: number; category?: string; customer?: string }
+    updates: { paymentMethod: string; amount: number; category?: string; customer?: string; phone?: string }
   ) => {
     if (!activeShift) {
       setShowShiftModal(true);
@@ -992,6 +993,7 @@ export function App() {
             amount: newAmount,
             category: updates.category || s.category,
             customer: updates.customer || s.customer,
+            phone: updates.phone !== undefined ? updates.phone : s.phone,
           };
         }
         return s;

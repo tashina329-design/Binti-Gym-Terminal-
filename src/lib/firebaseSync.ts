@@ -1527,6 +1527,111 @@ export async function dbRenewMember(
   }).catch((e) => console.warn('Broadcast notice:', e));
 }
 
+export async function dbUpdateSale(businessName: string, saleData: any, updates: { paymentMethod?: string; amount?: number; category?: string; customer?: string }) {
+  await ensureFirebaseAuth();
+  const salesColl = getBusinessCollectionRef(businessName, 'sales');
+  let updatedDocId = saleData.id;
+
+  if (updatedDocId) {
+    await updateDoc(doc(salesColl, updatedDocId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    const snap = await getDocs(salesColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return (
+        data.timestamp === saleData.timestamp &&
+        data.customer === saleData.customer
+      );
+    });
+    if (target) {
+      updatedDocId = target.id;
+      await updateDoc(doc(salesColl, target.id), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  dbBroadcastEvent(businessName, {
+    type: 'pos',
+    title: '✏️ Sale Record Updated',
+    message: `Updated sale: ${updates.customer || saleData.customer} (${updates.paymentMethod || saleData.payment} - $${updates.amount !== undefined ? updates.amount : saleData.amount})`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  }).catch((e) => console.warn('Broadcast notice:', e));
+}
+
+export async function dbUpdateAttendance(businessName: string, attData: any, updates: { plan?: string; status?: string; name?: string; phone?: string }) {
+  await ensureFirebaseAuth();
+  const attColl = getBusinessCollectionRef(businessName, 'attendance');
+  let updatedDocId = attData.id;
+
+  if (updatedDocId) {
+    await updateDoc(doc(attColl, updatedDocId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    const snap = await getDocs(attColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return data.timestamp === attData.timestamp && data.name === attData.name;
+    });
+    if (target) {
+      updatedDocId = target.id;
+      await updateDoc(doc(attColl, target.id), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  dbBroadcastEvent(businessName, {
+    type: 'checkin',
+    title: '✏️ Attendance Record Updated',
+    message: `Updated check-in: ${updates.name || attData.name} (${updates.plan || attData.plan})`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  }).catch((e) => console.warn('Broadcast notice:', e));
+}
+
+export async function dbUpdateExpense(businessName: string, expData: any, updates: { paymentMethod?: string; amount?: number; category?: string; description?: string }) {
+  await ensureFirebaseAuth();
+  const expColl = getBusinessCollectionRef(businessName, 'expenses');
+  let updatedDocId = expData.id;
+
+  if (updatedDocId) {
+    await updateDoc(doc(expColl, updatedDocId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    const snap = await getDocs(expColl);
+    const target = snap.docs.find((d) => {
+      const data = d.data();
+      return (
+        data.timestamp === expData.timestamp &&
+        data.description === expData.description
+      );
+    });
+    if (target) {
+      updatedDocId = target.id;
+      await updateDoc(doc(expColl, target.id), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+
+  dbBroadcastEvent(businessName, {
+    type: 'expense',
+    title: '✏️ Expense Record Updated',
+    message: `Updated expense: ${updates.description || expData.description} (${updates.paymentMethod || expData.payment} - $${updates.amount !== undefined ? updates.amount : expData.amount})`,
+    timestamp: getBruneiFormattedTime(new Date(), true),
+  }).catch((e) => console.warn('Broadcast notice:', e));
+}
+
 export async function dbDeleteSale(businessName: string, saleData: any) {
   await ensureFirebaseAuth();
   const salesColl = getBusinessCollectionRef(businessName, 'sales');

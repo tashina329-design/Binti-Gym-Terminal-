@@ -1,4 +1,4 @@
-import { DashboardData } from '../types';
+import { DashboardData, Member } from '../types';
 
 export interface SpreadsheetInfo {
   spreadsheetId: string;
@@ -912,4 +912,80 @@ async function applyMonthlySummaryFormatting(
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ requests }),
   });
+}
+
+/**
+ * Fetches all members listed in the Google Sheets 'Members Directory' (or 'Members List') tab.
+ */
+export async function fetchMembersFromGoogleSheets(
+  accessToken: string,
+  spreadsheetId: string
+): Promise<Member[]> {
+  // Check which tab exists: 'Members Directory' or fallback to 'Members List'
+  let range = "'Members Directory'!A2:G500";
+  let url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+
+  let res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    range = "'Members List'!A2:G500";
+    url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`;
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  }
+
+  if (!res.ok) {
+    throw new Error('Could not find "Members Directory" or "Members List" tab in your Google Spreadsheet.');
+  }
+
+  const json = await res.json();
+  const rows: any[][] = json.values || [];
+  const members: Member[] = [];
+
+  for (const row of rows) {
+    if (!row || row.length === 0) continue;
+
+    // Header row skip
+    const firstCell = String(row[0] || '').trim().toLowerCase();
+    if (firstCell.includes('member id') || firstCell === 'id') continue;
+
+    // Column mapping:
+    // A (0): Member ID (e.g. MEM-123456 or empty)
+    // B (1): Full Name
+    // C (2): Phone
+    // D (3): Plan
+    // E (4): Start Date
+    // F (5): End Date
+    // G (6): Status
+    let memberId = String(row[0] || '').trim();
+    let name = String(row[1] || '').trim();
+    let phone = String(row[2] || '').trim();
+    let plan = String(row[3] || '').trim();
+    let startDate = String(row[4] || '').trim();
+    let endDate = String(row[5] || '').trim();
+    let status = String(row[6] || '').trim();
+
+    // If user typed name in column A instead of ID
+    if (!name && memberId && !memberId.startsWith('MEM') && isNaN(Number(memberId))) {
+      name = memberId;
+      memberId = '';
+    }
+
+    if (!name) continue;
+
+    members.push({
+      memberId: memberId || undefined,
+      name,
+      phone,
+      plan: plan || 'Standard Monthly',
+      startDate: startDate || new Date().toISOString().split('T')[0],
+      endDate: endDate || '',
+      status: (status as any) || undefined,
+    });
+  }
+
+  return members;
 }

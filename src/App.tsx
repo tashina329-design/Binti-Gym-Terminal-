@@ -35,6 +35,9 @@ import {
   dbDeleteAttendance,
   dbDeleteExpense,
   dbDeleteMember,
+  dbUpdateSale,
+  dbUpdateAttendance,
+  dbUpdateExpense,
   dbStartShift,
   dbEndShift,
   dbResetDemoData,
@@ -924,6 +927,155 @@ export default function App() {
     }
   };
 
+  // Edit Handlers with Optimistic Updates & Firestore Sync
+  const handleEditSale = async (
+    record: any,
+    updates: { paymentMethod: string; amount: number; category?: string; customer?: string }
+  ) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
+
+    setDashboardData((prev) => {
+      const oldAmount = Number(record.amount) || 0;
+      const newAmount = Number(updates.amount) || 0;
+      const amountDiff = newAmount - oldAmount;
+
+      const oldPayment = (record.payment || record.paymentMethod || '').toLowerCase();
+      const newPayment = (updates.paymentMethod || '').toLowerCase();
+
+      let cashInDiff = 0;
+      let baiduriInDiff = 0;
+      let bibdInDiff = 0;
+
+      // Remove old amount from old payment bucket
+      if (oldPayment.includes('cash')) cashInDiff -= oldAmount;
+      else if (oldPayment.includes('baiduri')) baiduriInDiff -= oldAmount;
+      else if (oldPayment.includes('bibd')) bibdInDiff -= oldAmount;
+
+      // Add new amount to new payment bucket
+      if (newPayment.includes('cash')) cashInDiff += newAmount;
+      else if (newPayment.includes('baiduri')) baiduriInDiff += newAmount;
+      else if (newPayment.includes('bibd')) bibdInDiff += newAmount;
+
+      const updatedTodaySales = prev.todaySales.map((s, i) => {
+        if ((record.id && s.id === record.id) || (record.index !== undefined && i === record.index)) {
+          return {
+            ...s,
+            payment: updates.paymentMethod,
+            amount: newAmount,
+            category: updates.category || s.category,
+            customer: updates.customer || s.customer,
+          };
+        }
+        return s;
+      });
+
+      return {
+        ...prev,
+        todaySales: updatedTodaySales,
+        totalRevenue: prev.totalRevenue + amountDiff,
+        netIncome: prev.netIncome + amountDiff,
+        cashIn: Math.max(0, prev.cashIn + cashInDiff),
+        baiduriIn: Math.max(0, prev.baiduriIn + baiduriInDiff),
+        bibdIn: Math.max(0, prev.bibdIn + bibdInDiff),
+      };
+    });
+
+    try {
+      await dbUpdateSale(currentStore, record, updates);
+    } catch (err) {
+      console.error('Failed to update sale in cloud:', err);
+    }
+  };
+
+  const handleEditAttendance = async (
+    record: any,
+    updates: { plan: string; status: string; name?: string; phone?: string }
+  ) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
+
+    setDashboardData((prev) => {
+      const updatedTodayAttendance = prev.todayAttendance.map((a, i) => {
+        if ((record.id && a.id === record.id) || (record.index !== undefined && i === record.index)) {
+          return {
+            ...a,
+            plan: updates.plan,
+            status: updates.status,
+            name: updates.name || a.name,
+            phone: updates.phone !== undefined ? updates.phone : a.phone,
+          };
+        }
+        return a;
+      });
+
+      return {
+        ...prev,
+        todayAttendance: updatedTodayAttendance,
+      };
+    });
+
+    try {
+      await dbUpdateAttendance(currentStore, record, updates);
+    } catch (err) {
+      console.error('Failed to update attendance in cloud:', err);
+    }
+  };
+
+  const handleEditExpense = async (
+    record: any,
+    updates: { paymentMethod: string; amount: number; category?: string; description?: string }
+  ) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
+
+    setDashboardData((prev) => {
+      const oldAmount = Number(record.amount) || 0;
+      const newAmount = Number(updates.amount) || 0;
+      const amountDiff = newAmount - oldAmount;
+
+      const oldPayment = (record.payment || record.paymentMethod || '').toLowerCase();
+      const newPayment = (updates.paymentMethod || '').toLowerCase();
+
+      let cashOutDiff = 0;
+      if (oldPayment.includes('cash')) cashOutDiff -= oldAmount;
+      if (newPayment.includes('cash')) cashOutDiff += newAmount;
+
+      const updatedTodayExpenses = prev.todayExpenses.map((e, i) => {
+        if ((record.id && e.id === record.id) || (record.index !== undefined && i === record.index)) {
+          return {
+            ...e,
+            payment: updates.paymentMethod,
+            amount: newAmount,
+            category: updates.category || e.category,
+            description: updates.description || e.description,
+          };
+        }
+        return e;
+      });
+
+      return {
+        ...prev,
+        todayExpenses: updatedTodayExpenses,
+        totalExpenses: prev.totalExpenses + amountDiff,
+        netIncome: prev.netIncome - amountDiff,
+        cashOut: Math.max(0, prev.cashOut + cashOutDiff),
+      };
+    });
+
+    try {
+      await dbUpdateExpense(currentStore, record, updates);
+    } catch (err) {
+      console.error('Failed to update expense in cloud:', err);
+    }
+  };
+
   const handleStartShift = async (shift: StaffShift) => {
     setActiveShift(shift);
     saveStoredActiveShift(shift, currentStore);
@@ -1159,6 +1311,9 @@ export default function App() {
                 onDeleteSale={handleDeleteSale}
                 onDeleteAttendance={handleDeleteAttendance}
                 onDeleteExpense={handleDeleteExpense}
+                onEditSale={handleEditSale}
+                onEditAttendance={handleEditAttendance}
+                onEditExpense={handleEditExpense}
               />
             )}
 

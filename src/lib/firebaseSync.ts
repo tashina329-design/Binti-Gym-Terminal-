@@ -793,7 +793,8 @@ export function subscribeFirestoreBusiness(
   let liveActiveShift: StaffShift | null = getStoredActiveShift(cleanName);
   let liveStaffPin: string = '123456';
   let liveAvailableStores: string[] = [cleanName];
-  let lastHandledEventTime = 0;
+  let isFirstBizSnapshot = true;
+  let lastHandledEventTime = Date.now();
 
   const activeDate = viewDate || getBruneiTodayIsoDate();
 
@@ -854,12 +855,19 @@ export function subscribeFirestoreBusiness(
             const evt = data.lastEvent;
             const evtTime = Number(evt.timestampMs || evt.updatedAt || 0);
             const isRemote = Boolean(evt.deviceId && evt.deviceId !== myDeviceId);
-            if (evtTime > lastHandledEventTime) {
+
+            if (isFirstBizSnapshot) {
+              // Initial connect/refresh snapshot: record the latest timestamp to ignore past historical events
+              if (evtTime > 0) {
+                lastHandledEventTime = Math.max(lastHandledEventTime, evtTime);
+              }
+            } else if (evtTime > lastHandledEventTime) {
               lastHandledEventTime = evtTime;
               emitDashboard(evt, isRemote);
               return;
             }
           }
+          isFirstBizSnapshot = false;
         }
         emitDashboard();
       },

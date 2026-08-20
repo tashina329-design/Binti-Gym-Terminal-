@@ -8,7 +8,6 @@ import {
   Footprints,
   CreditCard,
   DollarSign,
-  QrCode,
   FileSpreadsheet,
   Grid,
   X,
@@ -27,7 +26,6 @@ export type TabId =
   | 'walkin'
   | 'membership'
   | 'expense'
-  | 'qrposter'
   | 'sheets';
 
 interface NavigationTabsProps {
@@ -64,7 +62,6 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
     { id: 'walkin', label: 'Walk-In Pass', category: 'Members', icon: <Footprints className="w-4 h-4" /> },
     { id: 'membership', label: 'Register Member', category: 'Members', icon: <CreditCard className="w-4 h-4" /> },
     { id: 'expense', label: 'Expense Outflow', category: 'Members', icon: <DollarSign className="w-4 h-4" /> },
-    { id: 'qrposter', label: 'Wall QR Poster', category: 'Tools', icon: <QrCode className="w-4 h-4" /> },
     { id: 'sheets', label: 'Google Sheets Sync', category: 'Tools', icon: <FileSpreadsheet className="w-4 h-4" />, badge: 'Sync' },
   ];
 

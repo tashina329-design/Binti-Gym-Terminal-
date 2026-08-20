@@ -13,7 +13,10 @@ import {
   ArrowRight,
   ShieldAlert,
   UserCheck,
-  Users
+  Users,
+  Edit2,
+  X,
+  Save
 } from 'lucide-react';
 import { DashboardData, Member } from '../../types';
 
@@ -30,6 +33,17 @@ interface MemberRegistrationTabProps {
   }) => Promise<DashboardData>;
   onOpenRenewModal: (member: Member) => void;
   onDeleteMember?: (memberId: string) => void;
+  onEditMember?: (
+    memberId: string,
+    updates: {
+      name: string;
+      phone: string;
+      plan: string;
+      startDate: string;
+      endDate: string;
+      status: 'active' | 'expiring' | 'expired';
+    }
+  ) => void;
 }
 
 // Phone & name normalization helpers for duplicate matching
@@ -46,10 +60,20 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   onRegisterMember,
   onOpenRenewModal,
   onDeleteMember,
+  onEditMember,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterView, setFilterView] = useState<'all' | 'duplicates'>('all');
   
+  // Edit member modal state
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editPlan, setEditPlan] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editStatus, setEditStatus] = useState<'active' | 'expiring' | 'expired'>('active');
+
   // Form fields
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -67,6 +91,31 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [ignoreDuplicateWarning, setIgnoreDuplicateWarning] = useState(false);
+
+  const openEditModal = (m: Member) => {
+    setEditingMember(m);
+    setEditName(m.name);
+    setEditPhone(m.phone);
+    setEditPlan(m.plan);
+    setEditStartDate(m.startDate || '');
+    setEditEndDate(m.endDate || '');
+    setEditStatus(m.status || 'active');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember || !onEditMember) return;
+    onEditMember(editingMember.memberId, {
+      name: editName.trim(),
+      phone: editPhone.trim(),
+      plan: editPlan.trim(),
+      startDate: editStartDate.trim(),
+      endDate: editEndDate.trim(),
+      status: editStatus,
+    });
+    setSuccessMsg(`Updated member details for "${editName.trim()}" successfully!`);
+    setEditingMember(null);
+  };
 
   const handlePlanChange = (plan: string) => {
     setPlanType(plan);
@@ -661,6 +710,15 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
                           >
                             <Zap className="w-3 h-3" /> Renew
                           </button>
+                          {onEditMember && (
+                            <button
+                              onClick={() => openEditModal(m)}
+                              className="p-1.5 text-sky-400 hover:text-sky-200 bg-sky-950/40 hover:bg-sky-900/60 border border-sky-800/50 rounded-lg transition-colors cursor-pointer"
+                              title="Edit member details (Name, Phone, Plan, Dates, Status)"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {onDeleteMember && (
                             <button
                               onClick={() => onDeleteMember(m.memberId)}
@@ -688,6 +746,130 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Edit Member Modal */}
+      {editingMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-sky-500/10 border border-sky-500/30 rounded-xl">
+                  <Edit2 className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Edit Member Details</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">ID: #{editingMember.memberId}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingMember(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Full Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-medium focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Phone Number</label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="e.g. 8712345"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 font-mono focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Plan Type</label>
+                  <select
+                    value={editPlan}
+                    onChange={(e) => setEditPlan(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="Standard Monthly">Standard Monthly ($55/mo)</option>
+                    <option value="Student Monthly">Student Monthly ($45/mo)</option>
+                    <option value="Walk-In">Walk-In Pass</option>
+                    <option value="Class">Class / Dance Pass</option>
+                    <option value="Personal Trainer">Personal Trainer</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Membership Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="active">Active (Valid)</option>
+                    <option value="expiring">Expiring Soon</option>
+                    <option value="expired">Expired</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Start Date</label>
+                  <input
+                    type="date"
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Expiry / Renew Date</label>
+                  <input
+                    type="date"
+                    value={editEndDate}
+                    onChange={(e) => setEditEndDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-sky-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400 bg-slate-950 p-2 rounded-lg border border-slate-800">
+                💡 Tip: When you save and next push data to Google Sheets, this member's updated details will be automatically synchronized to the <strong>Members Directory</strong> tab.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save Member
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

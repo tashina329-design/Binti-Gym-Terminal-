@@ -386,7 +386,13 @@ export function App() {
             read: false,
           };
 
-          setNotifications((prev) => [newNotif, ...prev]);
+          setNotifications((prev) => {
+            const updated = [newNotif, ...prev.slice(0, 49)];
+            try {
+              localStorage.setItem('gym_terminal_notifications', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
           setActivePushBanner(newNotif);
 
           const bannerTimeout = isExpiredEvent ? 8000 : 6000;

@@ -12,7 +12,6 @@ import { PersonalTrainerTab } from './components/tabs/PersonalTrainerTab';
 import { WalkInTab } from './components/tabs/WalkInTab';
 import { MemberRegistrationTab } from './components/tabs/MemberRegistrationTab';
 import { ExpenseTab } from './components/tabs/ExpenseTab';
-import { QrPosterTab } from './components/tabs/QrPosterTab';
 import { GoogleSheetsTab } from './components/tabs/GoogleSheetsTab';
 import { QuickRenewModal } from './components/QuickRenewModal';
 import { EntranceCheckInView } from './components/EntranceCheckInView';
@@ -1427,8 +1426,6 @@ export function App() {
             )}
 
             {activeTab === 'expense' && <ExpenseTab onRecordExpense={handleRecordExpense} />}
-
-            {activeTab === 'qrposter' && <QrPosterTab />}
 
             {activeTab === 'sheets' && (
               <GoogleSheetsTab

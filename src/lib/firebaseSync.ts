@@ -1822,6 +1822,33 @@ export async function dbDeleteMember(businessName: string, memberId: string) {
   }
 }
 
+export async function dbUpdateMember(
+  businessName: string,
+  memberId: string,
+  updates: {
+    name?: string;
+    phone?: string;
+    plan?: string;
+    startDate?: string;
+    endDate?: string;
+    status?: 'active' | 'expiring' | 'expired';
+  }
+) {
+  await ensureFirebaseAuth();
+  const membersColl = getBusinessCollectionRef(businessName, 'members');
+  const snap = await getDocs(membersColl);
+  const target = snap.docs.find((d) => {
+    const data = d.data();
+    return data.memberId === memberId || d.id === memberId;
+  });
+  if (target) {
+    await updateDoc(doc(membersColl, target.id), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
 export async function dbStartShift(businessName: string, shift: StaffShift) {
   saveStoredActiveShift(shift, businessName);
   await ensureFirebaseAuth();

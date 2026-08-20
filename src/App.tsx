@@ -39,6 +39,7 @@ import {
   dbUpdateSale,
   dbUpdateAttendance,
   dbUpdateExpense,
+  dbUpdateMember,
   dbStartShift,
   dbEndShift,
   dbResetDemoData,
@@ -946,10 +947,55 @@ export function App() {
       } else if (type === 'expense') {
         await dbDeleteExpense(currentStore, data);
       } else if (type === 'member') {
-        await dbDeleteMember(currentStore, data.memberId || data);
+        const mId = data.memberId || data;
+        setDashboardData((prev) => ({
+          ...prev,
+          members: prev.members.filter((m) => m.memberId !== mId),
+        }));
+        await dbDeleteMember(currentStore, mId);
       }
     } catch (err: any) {
       console.error('Delete error in Firestore:', err);
+    }
+  };
+
+  const handleEditMember = async (
+    memberId: string,
+    updates: {
+      name: string;
+      phone: string;
+      plan: string;
+      startDate: string;
+      endDate: string;
+      status: 'active' | 'expiring' | 'expired';
+    }
+  ) => {
+    if (!activeShift) {
+      setShowShiftModal(true);
+      return;
+    }
+
+    setDashboardData((prev) => ({
+      ...prev,
+      members: prev.members.map((m) =>
+        m.memberId === memberId
+          ? {
+              ...m,
+              name: updates.name,
+              phone: updates.phone,
+              plan: updates.plan,
+              startDate: updates.startDate,
+              endDate: updates.endDate,
+              status: updates.status,
+            }
+          : m
+      ),
+    }));
+
+    try {
+      await dbUpdateMember(currentStore, memberId, updates);
+    } catch (err) {
+      console.error('Failed to update member in cloud:', err);
     }
   };
 
@@ -1370,6 +1416,7 @@ export function App() {
                 onRegisterMember={handleRegisterMember}
                 onOpenRenewModal={(m) => setRenewMember(m)}
                 onDeleteMember={handleDeleteMember}
+                onEditMember={handleEditMember}
               />
             )}
 

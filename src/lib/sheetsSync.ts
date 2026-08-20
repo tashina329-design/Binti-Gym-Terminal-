@@ -609,21 +609,46 @@ export async function syncDataToGoogleSheets(
   // 2. Generate Monthly & Overall Financial Summary rows
   const monthlySummaryRows = calculateFinancialSummaryTable(data);
 
-  // 3. Prepare batch update value ranges
+  // 3. Clear existing values across all data tabs first so stale/deleted rows are completely purged
+  try {
+    const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`;
+    const clearBody = {
+      ranges: [
+        "'Daily Summary'!A1:Z5000",
+        "'Monthly Summary'!A1:Z500",
+        "'Sales Log'!A1:Z5000",
+        "'Check-In Log'!A1:Z5000",
+        "'Members Directory'!A1:Z5000",
+        "'Expenses Log'!A1:Z5000",
+      ],
+    };
+    await fetch(clearUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(clearBody),
+    });
+  } catch (clearErr) {
+    console.warn('Optional batch clear notice:', clearErr);
+  }
+
+  // 4. Prepare batch update value ranges (writes exact fresh rows from A1 down)
   const valueRanges = [
     // 1. Daily Summary (Latest on top)
     {
-      range: "'Daily Summary'!A1:B1000",
+      range: "'Daily Summary'!A1",
       values: mergedSummaryRows,
     },
     // 2. Monthly Financial Summary
     {
-      range: "'Monthly Summary'!A1:D50",
+      range: "'Monthly Summary'!A1",
       values: monthlySummaryRows,
     },
     // 3. Sales Log (Reverse chronological - latest on top)
     {
-      range: "'Sales Log'!A1:G500",
+      range: "'Sales Log'!A1",
       values: [
         ['Timestamp / Time', 'Staff on Duty', 'Category', 'Customer / Guest', 'Phone Number', 'Payment Method', 'Amount ($)'],
         ...data.todaySales.map((s) => [
@@ -639,7 +664,7 @@ export async function syncDataToGoogleSheets(
     },
     // 4. Check-In Log (Reverse chronological - latest on top)
     {
-      range: "'Check-In Log'!A1:E500",
+      range: "'Check-In Log'!A1",
       values: [
         ['Check-In Time', 'Member / Guest Name', 'Phone Number', 'Plan / Activity', 'Check-In Status'],
         ...data.todayAttendance.map((a) => [
@@ -651,9 +676,9 @@ export async function syncDataToGoogleSheets(
         ]),
       ],
     },
-    // 5. Members Directory
+    // 5. Members Directory (Mirrors exact current members in the system)
     {
-      range: "'Members Directory'!A1:G500",
+      range: "'Members Directory'!A1",
       values: [
         ['Member ID', 'Full Name', 'Phone', 'Plan', 'Start Date', 'End Date', 'Status'],
         ...data.members.map((m) => [
@@ -669,7 +694,7 @@ export async function syncDataToGoogleSheets(
     },
     // 6. Expenses Log (Reverse chronological - latest on top)
     {
-      range: "'Expenses Log'!A1:F500",
+      range: "'Expenses Log'!A1",
       values: [
         ['Time', 'Staff on Duty', 'Category', 'Description', 'Payment Method', 'Amount ($)'],
         ...data.todayExpenses.map((e) => [

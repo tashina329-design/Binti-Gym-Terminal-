@@ -614,12 +614,16 @@ export function App() {
 
     const now = new Date();
     const timestamp = selectedDate ? `${selectedDate}T${now.toTimeString().split(' ')[0]}` : now.toISOString();
+    const guestName = (data.name || '').trim();
+    const guestPhone = (data.phone || '').trim();
+    const formattedCustomer = guestName ? (guestPhone ? `${guestName} (${guestPhone})` : `${guestName} (Walk-In)`) : 'Walk-In Guest';
+
     const optSale = {
       id: 'opt_' + Date.now(),
       timestamp,
       category: 'Walk-In',
-      customer: data.name ? `${data.name} (Walk-in)` : 'Walk-In Guest',
-      phone: data.phone || '',
+      customer: formattedCustomer,
+      phone: guestPhone || '',
       paymentMethod: data.paymentMethod || 'Cash',
       amount: Number(data.amount) || 0,
       staff: activeShift?.staffName || 'Duty Staff',
@@ -630,8 +634,8 @@ export function App() {
     if (isCheckinMode) {
       triggerSelfCheckinNotification(
         '🔔 Walk-In Pass Check-In Alert',
-        `Guest ${data.name || 'Walk-In'} registered & checked in ($${data.amount || 4.0})!`,
-        data.name
+        `Guest ${guestName || 'Walk-In'} (${guestPhone || 'No Phone'}) registered & checked in ($${(Number(data.amount) || 4.0).toFixed(2)})!`,
+        guestName
       );
     } else {
       setActiveTab('sales');

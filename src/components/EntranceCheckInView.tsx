@@ -218,21 +218,47 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
       return;
     }
 
+    const trimmedName = walkinName.trim();
+    const trimmedPhone = walkinPhone.trim();
+
+    if (!trimmedName || !trimmedPhone) {
+      setStatusMessage({
+        type: 'error',
+        text: '⚠️ Name and Phone Number are required. Please input both to proceed with Walk-In Pass.',
+      });
+      return;
+    }
+
+    if (trimmedName.length < 2) {
+      setStatusMessage({
+        type: 'error',
+        text: '⚠️ Please enter a valid visitor name (at least 2 characters).',
+      });
+      return;
+    }
+
+    if (trimmedPhone.length < 4) {
+      setStatusMessage({
+        type: 'error',
+        text: '⚠️ Please enter a valid contact phone number.',
+      });
+      return;
+    }
+
     setLoading(true);
     setStatusMessage(null);
 
     try {
-      const nameToSubmit = walkinName.trim() || 'Walk-In Guest';
       await onRecordWalkIn({
-        name: nameToSubmit,
-        phone: walkinPhone.trim() || undefined,
+        name: trimmedName,
+        phone: trimmedPhone,
         amount: walkinFee,
         paymentMethod: walkinPayment,
       });
 
       setStatusMessage({
         type: 'success',
-        text: `🎟️ Walk-In Pass Issued! Welcome, ${nameToSubmit}. Paid $${walkinFee.toFixed(2)} via ${walkinPayment}.`,
+        text: `🎟️ Walk-In Pass Issued! Welcome, ${trimmedName} (${trimmedPhone}). Paid $${walkinFee.toFixed(2)} via ${walkinPayment}.`,
       });
       setWalkinName('');
       setWalkinPhone('');
@@ -407,32 +433,40 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
 
               <form onSubmit={handleWalkinSubmit} className="space-y-2 sm:space-y-3">
                 {/* Visitor Name & Phone Inputs */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[10px] sm:text-xs font-bold text-slate-300 mb-0.5 flex items-center gap-1">
-                      <User className="w-3 h-3 text-sky-400" /> Name
+                    <label className="block text-[10px] sm:text-xs font-bold text-slate-300 mb-0.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <User className="w-3 h-3 text-sky-400" /> Full Name <span className="text-rose-400">*</span>
+                      </span>
+                      <span className="text-[9px] text-sky-400 font-semibold uppercase tracking-wider">Required</span>
                     </label>
                     <input
                       type="text"
+                      required
                       value={walkinName}
                       onChange={(e) => setWalkinName(e.target.value)}
-                      placeholder="Guest"
-                      className="w-full h-10 sm:h-11 bg-slate-950 border border-slate-800 focus:border-sky-500 rounded-lg sm:rounded-xl px-3 text-xs sm:text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-all font-medium"
+                      placeholder="e.g. John Doe"
+                      className="w-full h-10 sm:h-11 bg-slate-950 border border-slate-800 focus:border-sky-500 focus:ring-1 focus:ring-sky-500/30 rounded-lg sm:rounded-xl px-3 text-xs sm:text-sm text-slate-100 placeholder-slate-600 focus:outline-none transition-all font-medium"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] sm:text-xs font-bold text-slate-300 mb-0.5 flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-sky-400" /> Phone
+                    <label className="block text-[10px] sm:text-xs font-bold text-slate-300 mb-0.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-sky-400" /> Phone Number <span className="text-rose-400">*</span>
+                      </span>
+                      <span className="text-[9px] text-sky-400 font-semibold uppercase tracking-wider">Required</span>
                     </label>
                     <input
                       type="tel"
+                      required
                       value={walkinPhone}
                       onFocus={() => setActiveTarget('walkinPhone')}
                       onChange={(e) => setWalkinPhone(e.target.value)}
                       placeholder="e.g. 8899001"
                       className={`w-full h-10 sm:h-11 bg-slate-950 border rounded-lg sm:rounded-xl px-3 text-xs sm:text-sm text-slate-100 placeholder-slate-600 focus:outline-none font-mono transition-all ${
-                        activeTarget === 'walkinPhone' ? 'border-sky-500 ring-1 ring-sky-500/30' : 'border-slate-800'
+                        activeTarget === 'walkinPhone' ? 'border-sky-500 ring-1 ring-sky-500/30' : 'border-slate-800 focus:border-sky-500'
                       }`}
                     />
                   </div>

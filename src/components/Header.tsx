@@ -98,22 +98,24 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center pb-4 mb-6 border-b border-slate-800 gap-4 relative">
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
-          <Dumbbell className="w-6 h-6" />
-        </div>
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-emerald-400 tracking-tight flex items-center gap-2">
-            {currentStore} Terminal
-          </h1>
-          <p className="text-xs text-slate-400">Store Operations & Daily Financial Ledger</p>
+    <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center pb-4 mb-6 border-b border-slate-800 gap-3 relative">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full lg:w-auto">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner shrink-0">
+            <Dumbbell className="w-5 h-5 sm:w-6 sm:h-6" />
+          </div>
+          <div>
+            <h1 className="text-lg sm:text-2xl font-bold text-emerald-400 tracking-tight flex items-center gap-2">
+              {currentStore} Terminal
+            </h1>
+            <p className="text-[11px] sm:text-xs text-slate-400">Store Operations & Daily Financial Ledger</p>
+          </div>
         </div>
 
         {/* Working Staff Shift Status Badge */}
         <button
           onClick={onOpenShiftModal}
-          className={`ml-0 sm:ml-1 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border transition-all cursor-pointer ${
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 border transition-all cursor-pointer min-h-[36px] ${
             activeShift
               ? 'bg-slate-900 hover:bg-slate-800 text-slate-100 border-emerald-500/40 shadow-sm'
               : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40 animate-pulse'
@@ -121,21 +123,21 @@ export const Header: React.FC<HeaderProps> = ({
           title="Staff Shift Duty Status"
         >
           <div className={`w-2 h-2 rounded-full ${activeShift ? 'bg-emerald-400 animate-ping' : 'bg-rose-400'}`} />
-          <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           {activeShift ? (
-            <span>
+            <span className="truncate max-w-[150px] sm:max-w-none">
               <strong className="text-emerald-400">{activeShift.staffName}</strong>
               <span className="text-slate-400 font-normal ml-1">({activeShift.startTime})</span>
             </span>
           ) : (
-            <span className="text-rose-300 font-bold">🔒 No Staff On Duty — Clock In</span>
+            <span className="text-rose-300 font-bold">🔒 No Staff — Clock In</span>
           )}
         </button>
 
         {/* Separate Log Out / Lock Terminal Button */}
         <button
           onClick={onLockTerminal}
-          className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60 transition-all shadow-sm cursor-pointer"
+          className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60 transition-all shadow-sm cursor-pointer min-h-[36px]"
           title="Lock Terminal & Require 6-Digit PIN Access"
         >
           <LogOut className="w-3.5 h-3.5" />
@@ -144,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Real-time Cross-Device Sync & Offline Mode Indicator Badge */}
         <div
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+          className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all min-h-[36px] ${
             syncStatus === 'connected'
               ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
               : syncStatus === 'reconnecting'
@@ -160,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
           }
         >
           <div
-            className={`w-2 h-2 rounded-full ${
+            className={`w-2 h-2 rounded-full shrink-0 ${
               syncStatus === 'connected'
                 ? 'bg-emerald-400 animate-pulse'
                 : syncStatus === 'reconnecting'
@@ -169,27 +171,27 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           />
           {syncStatus === 'offline' ? (
-            <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+            <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
           ) : (
-            <RefreshCw className={`w-3 h-3 ${syncStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <RefreshCw className={`w-3 h-3 shrink-0 ${syncStatus === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`} />
           )}
-          <span>
+          <span className="text-[11px] sm:text-xs">
             {syncStatus === 'connected'
-              ? 'Multi-Device Sync Live'
+              ? 'Sync Live'
               : syncStatus === 'reconnecting'
-              ? 'Sync Reconnecting...'
-              : 'Offline Mode (Local Active)'}
+              ? 'Reconnecting...'
+              : 'Offline Mode'}
           </span>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 self-end lg:self-center">
+      <div className="flex items-center gap-3 self-end lg:self-center">
         {/* Terminal Push Notification Bell Icon */}
         <div className="relative" ref={notifDropdownRef}>
           <button
             type="button"
             onClick={() => setShowNotifications(!showNotifications)}
-            className={`p-2 rounded-lg border transition-all relative cursor-pointer ${
+            className={`p-2 sm:p-2.5 rounded-xl border transition-all relative cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center ${
               unreadCount > 0
                 ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/20'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
@@ -206,7 +208,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Notifications Dropdown Drawer */}
           {showNotifications && (
-            <div className="absolute right-0 top-11 z-50 w-84 sm:w-96 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2 duration-200 space-y-3 backdrop-blur-xl">
+            <div className="absolute right-0 top-12 z-50 w-[calc(100vw-32px)] max-w-sm bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2 duration-200 space-y-3 backdrop-blur-xl">
               {/* Header Bar */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">

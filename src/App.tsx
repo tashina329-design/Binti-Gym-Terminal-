@@ -192,6 +192,7 @@ export function App() {
       return [];
     }
   });
+  const [showNotificationsModal, setShowNotificationsModal] = useState<boolean>(false);
   const [activePushBanner, setActivePushBanner] = useState<PushNotification | null>(null);
   const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(() => {
     try {
@@ -1204,15 +1205,16 @@ export function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-5 lg:p-8 font-sans pb-28 md:pb-8 relative">
       {/* Floating Push Notification Banner on Main Terminal */}
       {activePushBanner && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
+        <div className="fixed top-3 inset-x-3 sm:left-1/2 sm:-translate-x-1/2 sm:w-full sm:max-w-md z-[99999] animate-in slide-in-from-top-3 duration-300">
           <div
-            className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-2xl flex items-start justify-between gap-3 text-slate-100 backdrop-blur-md ${
+            onClick={() => setShowNotificationsModal(true)}
+            className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-[0_10px_35px_rgba(0,0,0,0.8)] flex items-start justify-between gap-3 text-slate-100 backdrop-blur-xl cursor-pointer hover:bg-slate-850 transition-all ${
               activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                ? 'border-rose-500 shadow-rose-950/80'
-                : 'border-emerald-500 shadow-emerald-950/80'
+                ? 'border-rose-500 shadow-rose-950/80 ring-2 ring-rose-500/20'
+                : 'border-emerald-500 shadow-emerald-950/80 ring-2 ring-emerald-500/20'
             }`}
           >
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3 min-w-0">
               <div
                 className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 animate-pulse ${
                   activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
@@ -1226,10 +1228,10 @@ export function App() {
                   <Bell className="w-5 h-5" />
                 )}
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-xs font-black uppercase tracking-wide ${
+                    className={`text-xs font-black uppercase tracking-wide truncate ${
                       activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
                         ? 'text-rose-400'
                         : 'text-emerald-400'
@@ -1237,35 +1239,57 @@ export function App() {
                   >
                     {activePushBanner.title}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
                     {activePushBanner.timestamp}
                   </span>
                 </div>
-                <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug">
+                <p className="text-xs font-bold text-slate-100 mt-0.5 leading-snug break-words">
                   {activePushBanner.message}
                 </p>
-                <span
-                  className={`inline-block text-[10px] font-semibold mt-1 ${
-                    activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                      ? 'text-rose-400'
-                      : 'text-emerald-400'
-                  }`}
-                >
-                  {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
-                    ? '⚠️ Action Required: Membership Expired'
-                    : '✓ Synced across all terminal screens'}
-                </span>
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <span
+                    className={`text-[10px] font-semibold ${
+                      activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                        ? 'text-rose-400'
+                        : 'text-emerald-400'
+                    }`}
+                  >
+                    {activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
+                      ? '⚠️ Action Required: Expired'
+                      : '✓ Synced Real-Time'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold underline">
+                    Tap to view alerts &rarr;
+                  </span>
+                </div>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => setActivePushBanner(null)}
-              className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActivePushBanner(null);
+              }}
+              className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 rounded-lg hover:bg-slate-800"
+              title="Dismiss"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
+      )}
+
+      {/* Floating Mobile Alert Bubble if unread alerts exist while scrolling */}
+      {notifications.length > 0 && !showNotificationsModal && (
+        <button
+          type="button"
+          onClick={() => setShowNotificationsModal(true)}
+          className="md:hidden fixed bottom-16 right-3 z-30 bg-amber-500 hover:bg-amber-400 text-slate-950 px-3 py-2 rounded-2xl font-black text-xs shadow-2xl flex items-center gap-1.5 border border-amber-300 ring-2 ring-slate-950 animate-bounce cursor-pointer active:scale-95 transition-transform"
+          title="Open Notifications"
+        >
+          <Bell className="w-4 h-4 text-slate-950" />
+          <span>{notifications.length} Alert{notifications.length > 1 ? 's' : ''}</span>
+        </button>
       )}
 
       {/* Main Container */}
@@ -1291,6 +1315,8 @@ export function App() {
           onClearNotifications={handleClearNotifications}
           onClearNotificationItem={handleClearNotificationItem}
           onTestNotification={handleTestNotification}
+          isOpenNotifications={showNotificationsModal}
+          onToggleNotifications={setShowNotificationsModal}
         />
 
         {/* Global Toolbar & Date Navigation */}
@@ -1348,6 +1374,8 @@ export function App() {
           activeShift={activeShift}
           onOpenShiftModal={() => setShowShiftModal(true)}
           onToggleCheckinMode={() => setIsCheckinMode(true)}
+          unreadNotifCount={notifications.length}
+          onOpenNotifications={() => setShowNotificationsModal(true)}
         />
 
         {/* Active Tab View Content / Locked Screen */}

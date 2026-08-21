@@ -15,6 +15,7 @@ import {
   Lock,
   ChevronRight,
   Sparkles,
+  Bell,
 } from 'lucide-react';
 import { StaffShift } from '../types';
 
@@ -35,6 +36,8 @@ interface NavigationTabsProps {
   activeShift?: StaffShift | null;
   onOpenShiftModal?: () => void;
   onToggleCheckinMode?: () => void;
+  unreadNotifCount?: number;
+  onOpenNotifications?: () => void;
 }
 
 interface TabItem {
@@ -51,6 +54,8 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   onTabChange,
   activeShift,
   onOpenShiftModal,
+  unreadNotifCount = 0,
+  onOpenNotifications,
 }) => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
@@ -229,25 +234,50 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       {/* ========================================================= */}
       <div className="md:hidden bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2 shadow-lg backdrop-blur-sm">
         <div className="flex items-center justify-between gap-2 px-1 mb-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active View:</span>
-            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider shrink-0">View:</span>
+            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 truncate">
               {activeTabItem.icon} {activeTabItem.label}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (!activeShift) {
-                onOpenShiftModal?.();
-                return;
-              }
-              setShowMobileMenu(true);
-            }}
-            className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/30 px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
-          >
-            <Grid className="w-3.5 h-3.5" /> All Views
-          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Mobile Alerts Quick Button */}
+            {onOpenNotifications && (
+              <button
+                type="button"
+                onClick={onOpenNotifications}
+                className={`text-[11px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all ${
+                  unreadNotifCount > 0
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                    : 'text-slate-400 bg-slate-800 hover:text-slate-200 border border-slate-700'
+                }`}
+                title="View Notifications"
+              >
+                <Bell className={`w-3.5 h-3.5 ${unreadNotifCount > 0 ? 'text-amber-400' : 'text-slate-400'}`} />
+                <span>Alerts</span>
+                {unreadNotifCount > 0 && (
+                  <span className="bg-rose-500 text-white text-[9px] px-1 rounded-full font-black">
+                    {unreadNotifCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!activeShift) {
+                  onOpenShiftModal?.();
+                  return;
+                }
+                setShowMobileMenu(true);
+              }}
+              className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/30 px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+            >
+              <Grid className="w-3.5 h-3.5" /> All Views
+            </button>
+          </div>
         </div>
 
         {/* Scrollable pill row for swift thumb access */}
@@ -299,7 +329,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
             );
           })}
 
-          {/* 5th Button: Open Full 9-Module Drawer */}
+          {/* 5th Button: Open Full 9-Module Drawer (with notification badge if unread) */}
           <button
             onClick={() => {
               if (!activeShift) {
@@ -308,13 +338,18 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
               }
               setShowMobileMenu(true);
             }}
-            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer min-h-[48px] ${
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer min-h-[48px] relative ${
               showMobileMenu || !mobilePrimaryTabs.some((t) => t.id === activeTab)
                 ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40 font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
-            <Grid className="w-5 h-5 text-emerald-400" />
+            <div className="relative">
+              <Grid className="w-5 h-5 text-emerald-400" />
+              {unreadNotifCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-rose-500 rounded-full border-2 border-slate-900 animate-pulse" />
+              )}
+            </div>
             <span className="text-[10px] mt-0.5 font-bold tracking-tight">More</span>
           </button>
         </div>
@@ -341,6 +376,35 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Quick Alerts Banner inside Drawer if unread */}
+            {onOpenNotifications && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  onOpenNotifications();
+                }}
+                className={`w-full p-3 rounded-2xl border flex items-center justify-between transition-all cursor-pointer ${
+                  unreadNotifCount > 0
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 hover:bg-amber-500/30'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`p-2 rounded-xl ${unreadNotifCount > 0 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                    <Bell className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <span className="font-bold text-xs block text-white">Live Notifications & Check-In Alerts</span>
+                    <span className="text-[11px] text-slate-400">
+                      {unreadNotifCount > 0 ? `${unreadNotifCount} unread alert${unreadNotifCount > 1 ? 's' : ''} waiting` : 'No unread alerts'}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-emerald-400">Open &rarr;</span>
+              </button>
+            )}
 
             {/* Currently Active Banner */}
             <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl flex items-center justify-between text-xs text-emerald-300">

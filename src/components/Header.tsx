@@ -39,6 +39,8 @@ interface HeaderProps {
   onRefresh: () => void;
   onClearNotifications?: () => void;
   onClearNotificationItem?: (id: string) => void;
+  onMarkAsRead?: (id: string) => void;
+  onMarkAllAsRead?: () => void;
   onTestNotification?: () => void;
   isOpenNotifications?: boolean;
   onToggleNotifications?: (isOpen: boolean) => void;
@@ -60,12 +62,15 @@ export const Header: React.FC<HeaderProps> = ({
   onRefresh,
   onClearNotifications,
   onClearNotificationItem,
+  onMarkAsRead,
+  onMarkAllAsRead,
   onTestNotification,
   isOpenNotifications,
   onToggleNotifications,
 }) => {
   const [internalShowNotifications, setInternalShowNotifications] = useState(false);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
   const showNotifications = isOpenNotifications !== undefined ? isOpenNotifications : internalShowNotifications;
   const setShowNotifications = (val: boolean) => {
@@ -77,14 +82,18 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const currentDateFormatted = getBruneiFormattedDate();
-  const unreadCount = notifications.length;
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const totalCount = notifications.length;
 
   // Click outside to close notification dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
       if (
         notifDropdownRef.current &&
-        !notifDropdownRef.current.contains(event.target as Node)
+        !notifDropdownRef.current.contains(target) &&
+        drawerRef.current &&
+        !drawerRef.current.contains(target)
       ) {
         setShowNotifications(false);
       }
@@ -325,6 +334,8 @@ export const Header: React.FC<HeaderProps> = ({
           />
 
           <div
+            ref={drawerRef}
+            onMouseDown={(e) => e.stopPropagation()}
             className="fixed inset-x-3 top-16 md:absolute md:inset-x-auto md:right-0 md:top-12 z-[99999] md:w-[380px] max-w-lg bg-slate-900 border-2 border-emerald-500/40 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] p-4 animate-in fade-in slide-in-from-top-3 duration-200 space-y-3 backdrop-blur-2xl"
           >
             {/* Header Bar */}
@@ -338,7 +349,7 @@ export const Header: React.FC<HeaderProps> = ({
                     Live Check-In Alerts
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {unreadCount === 0 ? 'No new alerts' : `${unreadCount} unread alert${unreadCount > 1 ? 's' : ''}`}
+                    {unreadCount === 0 ? 'No unread alerts' : `${unreadCount} unread alert${unreadCount > 1 ? 's' : ''}`}
                   </p>
                 </div>
               </div>
@@ -348,7 +359,11 @@ export const Header: React.FC<HeaderProps> = ({
                 {onToggleSound && (
                   <button
                     type="button"
-                    onClick={onToggleSound}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleSound();
+                    }}
                     className={`p-2 rounded-xl border text-xs transition-colors cursor-pointer ${
                       isSoundEnabled
                         ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-400 hover:bg-emerald-900/60'
@@ -360,12 +375,32 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
 
-                {/* Clear All Notifications Button */}
-                {unreadCount > 0 && onClearNotifications && (
+                {/* Mark All As Read Button */}
+                {unreadCount > 0 && onMarkAllAsRead && (
                   <button
                     type="button"
-                    onClick={onClearNotifications}
-                    className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 hover:text-rose-100 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMarkAllAsRead();
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-700/80 text-emerald-300 hover:text-emerald-100 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
+                    title="Mark all as read"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" /> Read All
+                  </button>
+                )}
+
+                {/* Clear All Notifications Button */}
+                {totalCount > 0 && onClearNotifications && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearNotifications();
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/80 text-rose-300 hover:text-rose-100 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer active:scale-95"
                     title="Clear all alerts"
                   >
                     <Trash2 className="w-3 h-3" /> Clear
@@ -374,7 +409,11 @@ export const Header: React.FC<HeaderProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setShowNotifications(false)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowNotifications(false);
+                  }}
                   className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                   title="Close alerts drawer"
                 >
@@ -388,32 +427,62 @@ export const Header: React.FC<HeaderProps> = ({
               {notifications.length > 0 ? (
                 notifications.map((n) => {
                   const isExpiredItem = n.type === 'expired' || n.type === 'blocked' || n.title.toLowerCase().includes('expired') || n.title.toLowerCase().includes('blocked');
+                  const isUnread = !n.read;
                   return (
                     <div
                       key={n.id}
-                      className={`p-3 rounded-2xl border transition-all text-xs relative group space-y-1.5 shadow-sm ${
+                      onClick={() => onMarkAsRead && onMarkAsRead(n.id)}
+                      className={`p-3 rounded-2xl border transition-all text-xs relative group space-y-1.5 shadow-sm cursor-pointer ${
                         isExpiredItem
-                          ? 'bg-rose-950/40 border-rose-800/80 hover:border-rose-500'
-                          : 'bg-slate-950/80 border-slate-800 hover:border-emerald-500/40'
+                          ? isUnread
+                            ? 'bg-rose-950/60 border-rose-600 ring-1 ring-rose-500/30'
+                            : 'bg-rose-950/20 border-rose-900/50 opacity-80'
+                          : isUnread
+                          ? 'bg-slate-900 border-emerald-500/50 ring-1 ring-emerald-500/20 hover:border-emerald-400'
+                          : 'bg-slate-950/60 border-slate-850 hover:border-slate-700 opacity-75'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           {getNotificationIcon(n)}
-                          <span className={`font-bold text-xs ${isExpiredItem ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          <span className={`font-bold text-xs truncate ${isExpiredItem ? 'text-rose-400' : isUnread ? 'text-emerald-400' : 'text-slate-200'}`}>
                             {n.title}
                           </span>
+                          {isUnread && (
+                            <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 shrink-0">
+                              NEW
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span className="text-[10px] text-slate-400 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
                             {n.timestamp}
                           </span>
+                          {/* Mark as read button */}
+                          {isUnread && onMarkAsRead && (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onMarkAsRead(n.id);
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer active:scale-95"
+                              title="Mark as read"
+                            >
+                              <CheckCheck className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {/* Individual Clear / Dismiss Button */}
                           {onClearNotificationItem && (
                             <button
                               type="button"
-                              onClick={() => onClearNotificationItem(n.id)}
-                              className="text-slate-500 hover:text-rose-400 p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onClearNotificationItem(n.id);
+                              }}
+                              className="text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer active:scale-95"
                               title="Clear this notification"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -422,18 +491,27 @@ export const Header: React.FC<HeaderProps> = ({
                         </div>
                       </div>
 
-                      <p className="text-slate-200 text-xs leading-snug">{n.message}</p>
+                      <p className={`text-xs leading-snug ${isUnread ? 'text-slate-100 font-medium' : 'text-slate-300'}`}>{n.message}</p>
 
                       {/* Meta badge */}
                       <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
-                        {n.memberName && (
+                        {n.memberName ? (
                           <span className="flex items-center gap-1 text-slate-300 font-medium">
                             <User className={`w-3 h-3 ${isExpiredItem ? 'text-rose-400' : 'text-emerald-400'}`} /> {n.memberName}
                           </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500">Live Terminal</span>
                         )}
-                        <span className={`${isExpiredItem ? 'text-rose-400 font-bold' : 'text-emerald-400/90 font-medium'} ml-auto flex items-center gap-0.5`}>
-                          {isExpiredItem ? '⚠️ Action Required' : '✓ Synced'}
-                        </span>
+                        <div className="flex items-center gap-2 ml-auto">
+                          {n.read ? (
+                            <span className="text-[10px] text-slate-400">✓ Read</span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400 font-semibold">● Unread</span>
+                          )}
+                          <span className={`${isExpiredItem ? 'text-rose-400 font-bold' : 'text-emerald-400/90 font-medium'} flex items-center gap-0.5`}>
+                            {isExpiredItem ? '⚠️ Action Required' : '✓ Synced'}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   );
@@ -452,25 +530,48 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Bottom Actions Bar */}
-            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
+            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
               {onTestNotification && (
                 <button
                   type="button"
-                  onClick={onTestNotification}
-                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-950/60 transition cursor-pointer"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTestNotification();
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 py-1.5 px-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-950/60 transition cursor-pointer active:scale-95"
                 >
-                  <Sparkles className="w-3.5 h-3.5" /> Test Alert Chime
+                  <Sparkles className="w-3.5 h-3.5" /> Test Chime
                 </button>
               )}
-              {unreadCount > 0 && onClearNotifications && (
-                <button
-                  type="button"
-                  onClick={onClearNotifications}
-                  className="text-slate-400 hover:text-rose-300 font-medium ml-auto transition py-1.5 px-3 rounded-xl hover:bg-slate-800 cursor-pointer"
-                >
-                  Clear All ({unreadCount})
-                </button>
-              )}
+              <div className="flex items-center gap-1.5 ml-auto">
+                {unreadCount > 0 && onMarkAllAsRead && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMarkAllAsRead();
+                    }}
+                    className="text-emerald-300 hover:text-emerald-100 font-bold transition py-1.5 px-2.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-700/80 flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <CheckCheck className="w-3 h-3" /> Read All ({unreadCount})
+                  </button>
+                )}
+                {totalCount > 0 && onClearNotifications && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearNotifications();
+                    }}
+                    className="text-rose-300 hover:text-rose-100 font-bold transition py-1.5 px-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-700/80 flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
+                  >
+                    <Trash2 className="w-3 h-3" /> Clear All ({totalCount})
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </>

@@ -649,7 +649,8 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
           </p>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
@@ -744,6 +745,116 @@ export const MemberRegistrationTab: React.FC<MemberRegistrationTabProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Member Cards List View */}
+        <div className="md:hidden space-y-3">
+          {filteredMembers.length > 0 ? (
+            filteredMembers.map((m) => {
+              const isDup = duplicateMemberMap.has(m.memberId);
+              const dupInfo = duplicateMemberMap.get(m.memberId);
+
+              return (
+                <div
+                  key={m.memberId}
+                  className={`bg-slate-900/95 border rounded-2xl p-4 shadow-sm space-y-3 transition-colors ${
+                    isDup
+                      ? 'border-amber-500/40 bg-amber-950/15'
+                      : 'border-slate-800'
+                  }`}
+                >
+                  {/* Top Bar: Name + ID + Status */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="text-sm font-bold text-slate-100">{m.name}</h4>
+                        <span className="bg-slate-800 text-slate-300 font-mono text-[10px] px-1.5 py-0.5 rounded">
+                          #{m.memberId || 'N/A'}
+                        </span>
+                      </div>
+                      {isDup && (
+                        <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                          Duplicate {dupInfo?.reasons.join('+')}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider shrink-0 ${getBadgeStyle(m.status)}`}>
+                      {m.status}
+                    </span>
+                  </div>
+
+                  {/* Details Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-800/80">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase">Phone</span>
+                      <div>
+                        {m.phone ? (
+                          <a
+                            href={`tel:${m.phone}`}
+                            className="font-mono text-sky-400 hover:underline flex items-center gap-1"
+                          >
+                            📞 {m.phone}
+                          </a>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase">Plan</span>
+                      <p className="font-medium text-slate-200 truncate">{m.plan}</p>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase">Registered Date</span>
+                      <p className="font-mono text-slate-400">{m.startDate || '-'}</p>
+                    </div>
+
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase">Renew / Expiry</span>
+                      <p className="font-mono font-bold text-slate-200">{m.endDate}</p>
+                    </div>
+                  </div>
+
+                  {/* Actions Buttons Row */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+                    <button
+                      onClick={() => onOpenRenewModal(m)}
+                      className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer min-h-[38px]"
+                    >
+                      <Zap className="w-3.5 h-3.5" /> Quick Renew
+                    </button>
+                    {onEditMember && (
+                      <button
+                        onClick={() => openEditModal(m)}
+                        className="px-3 py-2 text-sky-400 bg-sky-950/50 hover:bg-sky-900/60 border border-sky-800/60 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer min-h-[38px]"
+                        title="Edit details"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" /> Edit
+                      </button>
+                    )}
+                    {onDeleteMember && (
+                      <button
+                        onClick={() => onDeleteMember(m.memberId)}
+                        className="p-2 text-rose-400 bg-rose-950/50 hover:bg-rose-900/60 border border-rose-800/60 rounded-xl transition-colors cursor-pointer min-w-[38px] min-h-[38px] flex items-center justify-center"
+                        title="Delete member"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-slate-500 italic text-xs">
+              {filterView === 'duplicates'
+                ? 'No duplicate members found! All member records are unique.'
+                : 'No registered members found.'}
+            </div>
+          )}
         </div>
       </div>
 

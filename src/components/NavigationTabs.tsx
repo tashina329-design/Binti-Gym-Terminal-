@@ -12,8 +12,9 @@ import {
   Grid,
   X,
   UserCheck,
-  Monitor,
   Lock,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 import { StaffShift } from '../types';
 
@@ -39,6 +40,7 @@ interface NavigationTabsProps {
 interface TabItem {
   id: TabId;
   label: string;
+  shortLabel?: string;
   category: 'Operations' | 'Members' | 'Tools';
   icon: React.ReactNode;
   badge?: string;
@@ -49,20 +51,19 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   onTabChange,
   activeShift,
   onOpenShiftModal,
-  onToggleCheckinMode,
 }) => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const tabs: TabItem[] = [
-    { id: 'sales', label: 'Sales & Logs', category: 'Operations', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'staffcheckin', label: 'Phone Check-In', category: 'Operations', icon: <Smartphone className="w-4 h-4" />, badge: 'Fast' },
-    { id: 'pos', label: 'POS & Sauna', category: 'Operations', icon: <ShoppingBag className="w-4 h-4" /> },
-    { id: 'classes', label: 'Dance & Fitness Classes', category: 'Operations', icon: <Activity className="w-4 h-4" /> },
-    { id: 'pt', label: 'PT (Check In/Out)', category: 'Members', icon: <Dumbbell className="w-4 h-4" /> },
-    { id: 'walkin', label: 'Walk-In Pass', category: 'Members', icon: <Footprints className="w-4 h-4" /> },
-    { id: 'membership', label: 'Register Member', category: 'Members', icon: <CreditCard className="w-4 h-4" /> },
-    { id: 'expense', label: 'Expense Outflow', category: 'Members', icon: <DollarSign className="w-4 h-4" /> },
-    { id: 'sheets', label: 'Google Sheets Sync', category: 'Tools', icon: <FileSpreadsheet className="w-4 h-4" />, badge: 'Sync' },
+    { id: 'sales', label: 'Sales & Logs', shortLabel: 'Logs', category: 'Operations', icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'staffcheckin', label: 'Phone Check-In', shortLabel: 'Check-In', category: 'Operations', icon: <Smartphone className="w-4 h-4" />, badge: 'Fast' },
+    { id: 'pos', label: 'POS & Sauna', shortLabel: 'POS', category: 'Operations', icon: <ShoppingBag className="w-4 h-4" /> },
+    { id: 'classes', label: 'Dance & Fitness Classes', shortLabel: 'Classes', category: 'Operations', icon: <Activity className="w-4 h-4" /> },
+    { id: 'pt', label: 'PT (Check In/Out)', shortLabel: 'PT Coach', category: 'Members', icon: <Dumbbell className="w-4 h-4" /> },
+    { id: 'walkin', label: 'Walk-In Pass', shortLabel: 'Walk-In', category: 'Members', icon: <Footprints className="w-4 h-4" /> },
+    { id: 'membership', label: 'Register Member', shortLabel: 'Members', category: 'Members', icon: <CreditCard className="w-4 h-4" /> },
+    { id: 'expense', label: 'Expense Outflow', shortLabel: 'Expenses', category: 'Members', icon: <DollarSign className="w-4 h-4" /> },
+    { id: 'sheets', label: 'Google Sheets Sync', shortLabel: 'Sheets', category: 'Tools', icon: <FileSpreadsheet className="w-4 h-4" />, badge: 'Sync' },
   ];
 
   const handleSelectTab = (tabId: TabId) => {
@@ -76,12 +77,20 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
 
   const activeTabItem = tabs.find((t) => t.id === activeTab) || tabs[0];
 
+  // Mobile Bottom Bar Primary Tabs (Quick Access)
+  const mobilePrimaryTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+    { id: 'sales', label: 'Logs', icon: <BarChart3 className="w-5 h-5" /> },
+    { id: 'staffcheckin', label: 'Check-In', icon: <Smartphone className="w-5 h-5" /> },
+    { id: 'walkin', label: 'Walk-In', icon: <Footprints className="w-5 h-5" /> },
+    { id: 'membership', label: 'Members', icon: <CreditCard className="w-5 h-5" /> },
+  ];
+
   return (
     <div className="space-y-4 mb-6">
       {/* ========================================================= */}
-      {/* DESKTOP / TABLET MAIN NAVIGATION PANEL (Original Top Place) */}
+      {/* DESKTOP / TABLET MAIN NAVIGATION PANEL                    */}
       {/* ========================================================= */}
-      <div className="bg-slate-900/95 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-xl space-y-4 relative">
+      <div className="hidden md:block bg-slate-900/95 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-xl space-y-4 relative">
         {!activeShift && (
           <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2px] rounded-2xl z-10 flex items-center justify-between px-6 py-3 border border-rose-500/30">
             <div className="flex items-center gap-3">
@@ -216,32 +225,81 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       </div>
 
       {/* ========================================================= */}
-      {/* MOBILE BOTTOM NAVIGATION MENU (Visible on mobile)         */}
+      {/* MOBILE TOP TAB CHIPS (Fast horizontal swipe on mobile)    */}
       {/* ========================================================= */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900/95 border-t border-slate-800 backdrop-blur-xl px-3 py-2 shadow-2xl">
-        <div className="flex items-center gap-2">
-          {/* Scrollable Horizontal Tab Bar */}
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 min-w-0 flex-1 touch-pan-x">
-            {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleSelectTab(tab.id)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-2 shrink-0 transition-all border cursor-pointer ${
-                    isActive
-                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950/50'
-                      : 'bg-slate-800/90 text-slate-300 border-slate-700/80 hover:bg-slate-800'
-                  }`}
-                >
-                  <span className={isActive ? 'text-slate-950' : 'text-emerald-400'}>{tab.icon}</span>
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
+      <div className="md:hidden bg-slate-900/90 border border-slate-800/80 rounded-2xl p-2 shadow-lg backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-2 px-1 mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active View:</span>
+            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+              {activeTabItem.icon} {activeTabItem.label}
+            </span>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!activeShift) {
+                onOpenShiftModal?.();
+                return;
+              }
+              setShowMobileMenu(true);
+            }}
+            className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/30 px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+          >
+            <Grid className="w-3.5 h-3.5" /> All Views
+          </button>
+        </div>
 
-          {/* All Tabs Drawer Toggle Button */}
+        {/* Scrollable pill row for swift thumb access */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5 touch-pan-x">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleSelectTab(tab.id)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0 transition-all border cursor-pointer ${
+                  isActive
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-sm font-black'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800'
+                }`}
+              >
+                <span className={isActive ? 'text-slate-950' : 'text-emerald-400'}>{tab.icon}</span>
+                <span>{tab.shortLabel || tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ========================================================= */}
+      {/* MOBILE BOTTOM NAVIGATION DOCK (Persistent on mobile)      */}
+      {/* ========================================================= */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 border-t border-slate-800 backdrop-blur-xl px-2 py-1.5 shadow-[0_-4px_20px_rgba(0,0,0,0.5)]">
+        <div className="grid grid-cols-5 gap-1 items-center max-w-md mx-auto">
+          {mobilePrimaryTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleSelectTab(tab.id)}
+                className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer min-h-[48px] ${
+                  isActive
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-950/60'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className={`${isActive ? 'text-slate-950 scale-110' : 'text-slate-400'} transition-transform`}>
+                  {tab.icon}
+                </div>
+                <span className="text-[10px] mt-0.5 font-bold tracking-tight truncate w-full text-center">
+                  {tab.label}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* 5th Button: Open Full 9-Module Drawer */}
           <button
             onClick={() => {
               if (!activeShift) {
@@ -250,87 +308,111 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
               }
               setShowMobileMenu(true);
             }}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-400 font-bold rounded-xl text-xs shrink-0 flex items-center gap-1.5 shadow-sm cursor-pointer"
-            title="Open All Tabs Menu"
+            className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer min-h-[48px] ${
+              showMobileMenu || !mobilePrimaryTabs.some((t) => t.id === activeTab)
+                ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
           >
-            <Grid className="w-4 h-4" />
-            <span className="hidden sm:inline">Menu</span>
+            <Grid className="w-5 h-5 text-emerald-400" />
+            <span className="text-[10px] mt-0.5 font-bold tracking-tight">More</span>
           </button>
         </div>
       </div>
 
-      {/* Mobile Drawer Overlay Modal listing all 10 tabs in a 2-column grid */}
+      {/* ========================================================= */}
+      {/* MOBILE FULL MODULE DRAWER (Bottom Sheet Modal)            */}
+      {/* ========================================================= */}
       {showMobileMenu && (
-        <div className="md:hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col justify-end p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl">
+        <div className="md:hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col justify-end p-3 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl pb-8">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Grid className="w-5 h-5 text-emerald-400" /> Navigation Menu
+                  <Grid className="w-5 h-5 text-emerald-400" /> All Gym Modules
                 </h3>
-                <p className="text-xs text-slate-400">Select an operational view or tool</p>
+                <p className="text-xs text-slate-400">Quick access to all operational views</p>
               </div>
               <button
                 onClick={() => setShowMobileMenu(false)}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Active Tab Banner */}
+            {/* Currently Active Banner */}
             <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl flex items-center justify-between text-xs text-emerald-300">
-              <div className="flex items-center gap-2">
-                <span className="p-1.5 bg-emerald-500 text-slate-950 rounded-lg">{activeTabItem.icon}</span>
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-emerald-500 text-slate-950 rounded-xl">{activeTabItem.icon}</span>
                 <div>
-                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Currently Active</span>
-                  <span className="font-bold text-white">{activeTabItem.label}</span>
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Currently Viewing</span>
+                  <span className="font-bold text-white text-sm">{activeTabItem.label}</span>
                 </div>
               </div>
             </div>
 
-            {/* 2-Column Grid of All Tabs */}
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
-              {tabs.map((tab) => {
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => handleSelectTab(tab.id)}
-                    className={`p-3 rounded-2xl text-left border flex flex-col justify-between gap-2 transition-all cursor-pointer ${
-                      isActive
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow-lg shadow-emerald-950/50'
-                        : 'bg-slate-950/80 hover:bg-slate-800 text-slate-200 border-slate-800'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span
-                        className={`p-2 rounded-xl text-xs ${
-                          isActive ? 'bg-slate-950 text-emerald-400' : 'bg-slate-800 text-emerald-400'
-                        }`}
-                      >
-                        {tab.icon}
-                      </span>
-                      {tab.badge && (
-                        <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                            isActive ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
-                          }`}
-                        >
-                          {tab.badge}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-bold leading-tight">{tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {/* Categorized Modules */}
+            {(['Operations', 'Members', 'Tools'] as const).map((categoryName) => {
+              const categoryTitle =
+                categoryName === 'Operations'
+                  ? '⚡ Daily Operations'
+                  : categoryName === 'Members'
+                  ? '👥 Members & Services'
+                  : '🛠️ Cloud & Sync Tools';
+
+              return (
+                <div key={categoryName} className="space-y-2">
+                  <span className="text-[11px] uppercase font-bold text-slate-400 tracking-wider block px-1">
+                    {categoryTitle}
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {tabs
+                      .filter((t) => t.category === categoryName)
+                      .map((tab) => {
+                        const isActive = activeTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => handleSelectTab(tab.id)}
+                            className={`p-3 rounded-2xl text-left border flex flex-col justify-between gap-2 transition-all cursor-pointer min-h-[72px] ${
+                              isActive
+                                ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow-lg shadow-emerald-950/50'
+                                : 'bg-slate-950 hover:bg-slate-800 text-slate-200 border-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span
+                                className={`p-2 rounded-xl text-xs ${
+                                  isActive ? 'bg-slate-950 text-emerald-400' : 'bg-slate-800 text-emerald-400'
+                                }`}
+                              >
+                                {tab.icon}
+                              </span>
+                              {tab.badge && (
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                    isActive ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {tab.badge}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs font-bold leading-snug">{tab.label}</span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
     </div>
   );
 };
+
 

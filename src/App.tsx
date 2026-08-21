@@ -215,6 +215,7 @@ export function App() {
 
   const handleClearNotifications = () => {
     setNotifications([]);
+    setActivePushBanner(null);
     try {
       localStorage.removeItem('gym_terminal_notifications');
     } catch {}
@@ -228,6 +229,29 @@ export function App() {
       } catch {}
       return filtered;
     });
+    setActivePushBanner((current) => (current?.id === id ? null : current));
+  };
+
+  const handleMarkAsRead = (id: string) => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => (n.id === id ? { ...n, read: true } : n));
+      try {
+        localStorage.setItem('gym_terminal_notifications', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setActivePushBanner((current) => (current?.id === id ? null : current));
+  };
+
+  const handleMarkAllAsRead = () => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }));
+      try {
+        localStorage.setItem('gym_terminal_notifications', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setActivePushBanner(null);
   };
 
   const triggerSelfCheckinNotification = (
@@ -1200,6 +1224,7 @@ export function App() {
   }
 
   const isToday = selectedDate === getTodayIsoDate();
+  const unreadNotifCount = notifications.filter((n) => !n.read).length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-5 lg:p-8 font-sans pb-28 md:pb-8 relative">
@@ -1207,7 +1232,10 @@ export function App() {
       {activePushBanner && (
         <div className="fixed top-3 inset-x-3 sm:left-1/2 sm:-translate-x-1/2 sm:w-full sm:max-w-md z-[99999] animate-in slide-in-from-top-3 duration-300">
           <div
-            onClick={() => setShowNotificationsModal(true)}
+            onClick={() => {
+              handleMarkAsRead(activePushBanner.id);
+              setShowNotificationsModal(true);
+            }}
             className={`bg-slate-900 border-2 rounded-2xl p-4 shadow-[0_10px_35px_rgba(0,0,0,0.8)] flex items-start justify-between gap-3 text-slate-100 backdrop-blur-xl cursor-pointer hover:bg-slate-850 transition-all ${
               activePushBanner.type === 'expired' || activePushBanner.type === 'blocked'
                 ? 'border-rose-500 shadow-rose-950/80 ring-2 ring-rose-500/20'
@@ -1264,23 +1292,37 @@ export function App() {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setActivePushBanner(null);
-              }}
-              className="text-slate-400 hover:text-white p-1 cursor-pointer shrink-0 rounded-lg hover:bg-slate-800"
-              title="Dismiss"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMarkAsRead(activePushBanner.id);
+                  setActivePushBanner(null);
+                }}
+                className="text-emerald-400 hover:text-emerald-300 p-1 cursor-pointer rounded-lg hover:bg-slate-800 text-[11px] font-bold"
+                title="Mark as Read / Dismiss"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClearNotificationItem(activePushBanner.id);
+                }}
+                className="text-slate-400 hover:text-rose-400 p-1 cursor-pointer rounded-lg hover:bg-slate-800"
+                title="Clear Alert"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Floating Mobile Alert Bubble if unread alerts exist while scrolling */}
-      {notifications.length > 0 && !showNotificationsModal && (
+      {unreadNotifCount > 0 && !showNotificationsModal && (
         <button
           type="button"
           onClick={() => setShowNotificationsModal(true)}
@@ -1288,7 +1330,7 @@ export function App() {
           title="Open Notifications"
         >
           <Bell className="w-4 h-4 text-slate-950" />
-          <span>{notifications.length} Alert{notifications.length > 1 ? 's' : ''}</span>
+          <span>{unreadNotifCount} New Alert{unreadNotifCount > 1 ? 's' : ''}</span>
         </button>
       )}
 
@@ -1314,6 +1356,8 @@ export function App() {
           }}
           onClearNotifications={handleClearNotifications}
           onClearNotificationItem={handleClearNotificationItem}
+          onMarkAsRead={handleMarkAsRead}
+          onMarkAllAsRead={handleMarkAllAsRead}
           onTestNotification={handleTestNotification}
           isOpenNotifications={showNotificationsModal}
           onToggleNotifications={setShowNotificationsModal}
@@ -1374,7 +1418,7 @@ export function App() {
           activeShift={activeShift}
           onOpenShiftModal={() => setShowShiftModal(true)}
           onToggleCheckinMode={() => setIsCheckinMode(true)}
-          unreadNotifCount={notifications.length}
+          unreadNotifCount={unreadNotifCount}
           onOpenNotifications={() => setShowNotificationsModal(true)}
         />
 

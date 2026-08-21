@@ -485,18 +485,28 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
           {/* Status Message Display Banner */}
           {statusMessage && (
             <div
-              className={`p-2.5 rounded-xl border text-center font-extrabold text-xs flex items-center justify-center gap-1.5 mt-2 transition-all shadow-md ${
+              className={`p-2.5 rounded-xl border text-center font-extrabold text-xs flex items-center justify-between gap-1.5 mt-2 transition-all shadow-md ${
                 statusMessage.type === 'success'
                   ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/80'
                   : 'bg-rose-950/90 text-rose-300 border-rose-500/80'
               }`}
             >
-              {statusMessage.type === 'success' ? (
-                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-              )}
-              <span className="line-clamp-2">{statusMessage.text}</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span className="line-clamp-2">{statusMessage.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusMessage(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                title="Dismiss message"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Smartphone, CheckCircle, AlertCircle, Users } from 'lucide-react';
+import { Smartphone, CheckCircle, AlertCircle, Users, X } from 'lucide-react';
 import { CheckInResponse, MemberMatch } from '../../types';
 
 interface PhoneCheckinTabProps {
@@ -123,18 +123,28 @@ export const PhoneCheckinTab: React.FC<PhoneCheckinTabProps> = ({
       {/* Alert Status */}
       {statusMessage && (
         <div
-          className={`mt-4 p-4 rounded-lg flex items-center gap-3 border text-sm font-semibold ${
+          className={`mt-4 p-4 rounded-xl flex items-center justify-between gap-3 border text-sm font-semibold animate-in fade-in duration-200 ${
             statusMessage.type === 'success'
               ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
               : 'bg-rose-950/80 text-rose-300 border-rose-600/60'
           }`}
         >
-          {statusMessage.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
-          )}
-          <span>{statusMessage.text}</span>
+          <div className="flex items-center gap-3 min-w-0">
+            {statusMessage.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            )}
+            <span className="leading-snug">{statusMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusMessage(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+            title="Dismiss alert"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

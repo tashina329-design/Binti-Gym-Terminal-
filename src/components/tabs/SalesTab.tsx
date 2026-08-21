@@ -178,10 +178,17 @@ export const SalesTab: React.FC<SalesTabProps> = ({
         </div>
       </div>
 
-      {/* Income & Revenue Log Table */}
+      {/* Income & Revenue Log */}
       <div>
-        <h3 className="text-base font-semibold text-slate-200 mb-2">Income & Revenue Log</h3>
-        <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="text-base font-semibold text-slate-200">Income & Revenue Log</h3>
+          <span className="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-700/40">
+            {data.todaySales?.length || 0} records
+          </span>
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
@@ -259,12 +266,93 @@ export const SalesTab: React.FC<SalesTabProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Mobile Cards View */}
+        <div className="md:hidden space-y-2.5">
+          {data.todaySales && data.todaySales.length > 0 ? (
+            data.todaySales.map((s, i) => (
+              <div
+                key={s.id || i}
+                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                      {s.time}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
+                      {s.category}
+                    </span>
+                  </div>
+                  <span className="text-base font-black text-emerald-400">
+                    +${Number(s.amount).toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-100">{s.customer}</h4>
+                    {s.phone && s.phone !== '-' && (
+                      <a
+                        href={`tel:${s.phone}`}
+                        className="text-xs text-sky-400 font-mono hover:underline inline-flex items-center gap-1 mt-0.5"
+                      >
+                        📞 {s.phone}
+                      </a>
+                    )}
+                  </div>
+                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                    👤 {s.staff || 'Duty Staff'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span className="text-xs font-semibold text-slate-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                    💳 {s.payment}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {onEditSale && (
+                      <button
+                        type="button"
+                        onClick={() => openEditSale(s, i)}
+                        className="px-2.5 py-1 text-xs text-amber-400 bg-amber-950/50 border border-amber-800/60 rounded-lg flex items-center gap-1 font-semibold cursor-pointer"
+                      >
+                        <Pencil className="w-3 h-3" /> Edit
+                      </button>
+                    )}
+                    {onDeleteSale && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteSale({ ...s, index: i })}
+                        className="p-1.5 text-rose-400 bg-rose-950/50 border border-rose-800/60 rounded-lg cursor-pointer"
+                        title="Delete sale record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-slate-500 italic text-xs">
+              No sales recorded for this date.
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Attendance Log Table */}
+      {/* Attendance Log */}
       <div>
-        <h3 className="text-base font-semibold text-slate-200 mb-2">Attendance Log</h3>
-        <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="text-base font-semibold text-slate-200">Attendance Log</h3>
+          <span className="text-xs font-mono text-sky-400 bg-sky-950/60 px-2 py-0.5 rounded-full border border-sky-700/40">
+            {data.todayAttendance?.length || 0} check-ins
+          </span>
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
@@ -325,12 +413,81 @@ export const SalesTab: React.FC<SalesTabProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Mobile Cards View */}
+        <div className="md:hidden space-y-2.5">
+          {data.todayAttendance && data.todayAttendance.length > 0 ? (
+            data.todayAttendance.map((a, i) => (
+              <div
+                key={a.id || i}
+                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                    {a.time}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold ${getBadgeStyle(a.status)}`}>
+                    {a.status}
+                  </span>
+                </div>
+
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-100">{a.name}</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">{a.plan}</p>
+                  </div>
+                  {a.phone && a.phone !== '-' && (
+                    <a
+                      href={`tel:${a.phone}`}
+                      className="text-xs text-sky-400 font-mono hover:underline inline-flex items-center gap-1 bg-sky-950/30 px-2 py-1 rounded-lg border border-sky-800/40"
+                    >
+                      📞 {a.phone}
+                    </a>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-800/80">
+                  {onEditAttendance && (
+                    <button
+                      type="button"
+                      onClick={() => openEditAttendance(a, i)}
+                      className="px-2.5 py-1 text-xs text-amber-400 bg-amber-950/50 border border-amber-800/60 rounded-lg flex items-center gap-1 font-semibold cursor-pointer"
+                    >
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                  )}
+                  {onDeleteAttendance && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteAttendance({ ...a, index: i })}
+                      className="p-1.5 text-rose-400 bg-rose-950/50 border border-rose-800/60 rounded-lg cursor-pointer"
+                      title="Delete attendance log"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-slate-500 italic text-xs">
+              No check-ins recorded for this date.
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Expense Outflows Table */}
+      {/* Expense Outflows */}
       <div>
-        <h3 className="text-base font-semibold text-slate-200 mb-2">Expense Outflows</h3>
-        <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="text-base font-semibold text-slate-200">Expense Outflows</h3>
+          <span className="text-xs font-mono text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded-full border border-rose-700/40">
+            {data.todayExpenses?.length || 0} outflows
+          </span>
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/60">
           <table className="w-full text-left text-xs text-slate-300 border-collapse">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
@@ -400,6 +557,70 @@ export const SalesTab: React.FC<SalesTabProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Cards View */}
+        <div className="md:hidden space-y-2.5">
+          {data.todayExpenses && data.todayExpenses.length > 0 ? (
+            data.todayExpenses.map((e, i) => (
+              <div
+                key={e.id || i}
+                className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">
+                      {e.time}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-rose-950/80 text-rose-300 border border-rose-700/50">
+                      {e.category}
+                    </span>
+                  </div>
+                  <span className="text-base font-black text-rose-400">
+                    -${Number(e.amount).toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm text-slate-200 font-medium">{e.description}</p>
+                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                    👤 {e.staff || 'Duty Staff'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                  <span className="text-xs font-semibold text-slate-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                    💳 {e.payment}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {onEditExpense && (
+                      <button
+                        type="button"
+                        onClick={() => openEditExpense(e, i)}
+                        className="px-2.5 py-1 text-xs text-amber-400 bg-amber-950/50 border border-amber-800/60 rounded-lg flex items-center gap-1 font-semibold cursor-pointer"
+                      >
+                        <Pencil className="w-3 h-3" /> Edit
+                      </button>
+                    )}
+                    {onDeleteExpense && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteExpense({ ...e, index: i })}
+                        className="p-1.5 text-rose-400 bg-rose-950/50 border border-rose-800/60 rounded-lg cursor-pointer"
+                        title="Delete expense record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-slate-500 italic text-xs">
+              No expenses recorded for this date.
+            </div>
+          )}
         </div>
       </div>
 

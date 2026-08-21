@@ -15,56 +15,72 @@ export const StatsGrid: React.FC<StatsGridProps> = ({ data }) => {
   const isNetPositive = netInc >= 0;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5 mb-6">
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/70 shadow-sm">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 sm:gap-3.5 mb-6">
+      {/* Gross Sales */}
+      <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
         <div className="flex items-center justify-between text-slate-400 mb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider">Gross Sales</span>
-          <DollarSign className="w-4 h-4 text-emerald-400" />
+          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">Gross Sales</span>
+          <div className="p-1 rounded-lg bg-emerald-500/10 text-emerald-400">
+            <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </div>
         </div>
-        <h2 className="text-xl sm:text-2xl font-bold text-emerald-400">
+        <h2 className="text-lg sm:text-2xl font-black text-emerald-400 tracking-tight">
           ${totalRev.toFixed(2)}
         </h2>
       </div>
 
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/70 shadow-sm">
+      {/* Expenses */}
+      <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
         <div className="flex items-center justify-between text-slate-400 mb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider">Expenses</span>
-          <TrendingDown className="w-4 h-4 text-rose-400" />
+          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">Expenses</span>
+          <div className="p-1 rounded-lg bg-rose-500/10 text-rose-400">
+            <TrendingDown className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </div>
         </div>
-        <h2 className="text-xl sm:text-2xl font-bold text-rose-400">
+        <h2 className="text-lg sm:text-2xl font-black text-rose-400 tracking-tight">
           ${totalExp.toFixed(2)}
         </h2>
       </div>
 
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/70 shadow-sm">
+      {/* Net Profit */}
+      <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
         <div className="flex items-center justify-between text-slate-400 mb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider">Net Profit</span>
-          <Wallet className={`w-4 h-4 ${isNetPositive ? 'text-emerald-400' : 'text-rose-400'}`} />
+          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">Net Profit</span>
+          <div className={`p-1 rounded-lg ${isNetPositive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
+            <Wallet className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </div>
         </div>
-        <h2 className={`text-xl sm:text-2xl font-bold ${isNetPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+        <h2 className={`text-lg sm:text-2xl font-black tracking-tight ${isNetPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
           ${netInc.toFixed(2)}
         </h2>
       </div>
 
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/70 shadow-sm">
+      {/* Check-Ins */}
+      <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-slate-800 shadow-sm relative overflow-hidden">
         <div className="flex items-center justify-between text-slate-400 mb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider">Check-Ins</span>
-          <Users className="w-4 h-4 text-sky-400" />
+          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400">Check-Ins</span>
+          <div className="p-1 rounded-lg bg-sky-500/10 text-sky-400">
+            <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </div>
         </div>
-        <h2 className="text-xl sm:text-2xl font-bold text-sky-400">
+        <h2 className="text-lg sm:text-2xl font-black text-sky-400 tracking-tight">
           {checkinCnt}
         </h2>
       </div>
 
-      <div className="bg-slate-800/80 p-4 rounded-xl border border-amber-900/50 shadow-sm col-span-2 md:col-span-1">
+      {/* Expiring Soon */}
+      <div className="bg-slate-900/90 p-3 sm:p-4 rounded-2xl border border-amber-500/30 shadow-sm col-span-2 md:col-span-1 relative overflow-hidden">
         <div className="flex items-center justify-between text-amber-400/90 mb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-400">Expiring Soon</span>
-          <AlertTriangle className="w-4 h-4 text-amber-400" />
+          <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-amber-400">Expiring Soon</span>
+          <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400">
+            <AlertTriangle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </div>
         </div>
-        <h2 className="text-xl sm:text-2xl font-bold text-amber-400">
+        <h2 className="text-lg sm:text-2xl font-black text-amber-400 tracking-tight">
           {expiringCnt}
         </h2>
       </div>
     </div>
   );
 };
+
